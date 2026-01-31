@@ -128,9 +128,7 @@ const formatExpireAtDisplay = (expireAt?: string | null) => {
   if (!raw) return '-'
   const match = raw.match(/^(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2})(?::(\d{2}))?$/)
   if (match) {
-    const [, year, month, day, hour, minute, second = '00'] = match
-    const iso = `${year}-${month}-${day}T${hour}:${minute}:${second}+08:00`
-    return formatShanghaiDate(new Date(iso), dateFormatOptions.value)
+    return raw
   }
   return formatShanghaiDate(raw, dateFormatOptions.value)
 }
