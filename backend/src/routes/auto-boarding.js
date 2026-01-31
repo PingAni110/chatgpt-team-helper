@@ -301,7 +301,7 @@ router.post('/', apiKeyAuth, async (req, res) => {
 
       // 自动生成兑换码：可用名额 = 总容量(5) - 当前成员数
       const totalCapacity = 5
-      const currentUserCount = Math.max(0, Number(responseAccount.userCount ?? account.userCount ?? 0))
+      const currentUserCount = Math.max(1, Number(responseAccount.userCount ?? account.userCount ?? 1))
       const availableSlots = Math.max(0, totalCapacity - currentUserCount)
       const codesToGenerate = availableSlots
 
