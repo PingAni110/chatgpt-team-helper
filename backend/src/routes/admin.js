@@ -733,6 +733,7 @@ router.put('/purchase-settings', async (req, res) => {
       }
       const serviceDays = Math.max(1, toInt(product?.serviceDays ?? 1, 1))
       const sortOrder = Number.isFinite(Number(product?.sortOrder)) ? Number(product.sortOrder) : 0
+      const showNoticeInCatalog = product?.showNoticeInCatalog === true
       const normalizeNoticeItems = (value) => {
         const normalizeItem = (item) => {
           const text = String(item?.text ?? item ?? '').trim()
@@ -763,6 +764,7 @@ router.put('/purchase-settings', async (req, res) => {
         isActive: product?.isActive !== false,
         isNoWarranty: Boolean(product?.isNoWarranty),
         isAntiBan: Boolean(product?.isAntiBan),
+        showNoticeInCatalog,
         notice
       }
     })

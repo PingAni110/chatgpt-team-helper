@@ -210,6 +210,7 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
     const isActiveResolved = input?.isActive === false ? false : Boolean(input?.isActive ?? true)
     const isNoWarrantyResolved = Boolean(input?.isNoWarranty ?? fallback?.isNoWarranty ?? false)
     const isAntiBanResolved = Boolean(input?.isAntiBan ?? fallback?.isAntiBan ?? false)
+    const showNoticeInCatalogResolved = Boolean(input?.showNoticeInCatalog ?? fallback?.showNoticeInCatalog ?? false)
     const noticeResolved = normalizeNoticeItems(input?.notice, fallback?.notice ?? [])
     return {
       key,
@@ -220,6 +221,7 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
       isActive: isActiveResolved,
       isNoWarranty: isNoWarrantyResolved,
       isAntiBan: isAntiBanResolved,
+      showNoticeInCatalog: showNoticeInCatalogResolved,
       notice: noticeResolved
     }
   }
@@ -234,6 +236,7 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
       isActive: true,
       isNoWarranty: false,
       isAntiBan: false,
+      showNoticeInCatalog: false,
       notice: env.notice
     },
     {
@@ -245,6 +248,7 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
       isActive: true,
       isNoWarranty: false,
       isAntiBan: true,
+      showNoticeInCatalog: false,
       notice: env.notice
     },
     {
@@ -256,6 +260,7 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
       isActive: true,
       isNoWarranty: true,
       isAntiBan: false,
+      showNoticeInCatalog: false,
       notice: env.notice
     }
   ]

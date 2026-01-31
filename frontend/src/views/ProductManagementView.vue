@@ -23,6 +23,7 @@ const formData = ref({
     isActive?: boolean
     isNoWarranty?: boolean
     isAntiBan?: boolean
+    showNoticeInCatalog?: boolean
     notice?: Array<{
       text: string
       bold?: boolean
@@ -48,6 +49,7 @@ const loadSettings = async () => {
         isActive: item.isActive !== false,
         isNoWarranty: Boolean(item.isNoWarranty),
         isAntiBan: Boolean(item.isAntiBan),
+        showNoticeInCatalog: Boolean(item.showNoticeInCatalog),
         notice: Array.isArray(item.notice) ? item.notice : []
       }))
     }
@@ -91,6 +93,7 @@ const addProduct = () => {
     isActive: true,
     isNoWarranty: false,
     isAntiBan: false,
+    showNoticeInCatalog: false,
     notice: []
   })
 }
@@ -214,6 +217,10 @@ const removeProduct = (index: number) => {
             <label class="flex items-center gap-2 text-sm text-gray-600">
               <input type="checkbox" v-model="product.isAntiBan" class="h-4 w-4 rounded border-gray-300" />
               防封禁
+            </label>
+            <label class="flex items-center gap-2 text-sm text-gray-600">
+              <input type="checkbox" v-model="product.showNoticeInCatalog" class="h-4 w-4 rounded border-gray-300" />
+              展示购前须知
             </label>
           </div>
         </div>

@@ -69,18 +69,18 @@
                   </div>
                 </div>
 
-                <ul class="space-y-3.5 text-[14px] text-[#1d1d1f]/70 dark:text-white/70 leading-relaxed">
-                  <li class="flex items-start gap-3">
-                    <span class="h-1.5 w-1.5 rounded-full bg-[#007AFF] mt-2 flex-shrink-0"></span>
-                    <span>{{ plan.key === 'no_warranty' ? '不支持退款 / 补号' : '支持退款 / 补号' }}</span>
-                  </li>
-                  <li class="flex items-start gap-3">
-                    <span class="h-1.5 w-1.5 rounded-full bg-[#007AFF] mt-2 flex-shrink-0"></span>
-                    <span>支付成功后系统自动处理</span>
-                  </li>
-                  <li v-if="plan.key === 'anti_ban'" class="flex items-start gap-3">
-                    <span class="h-1.5 w-1.5 rounded-full bg-red-600 mt-2 flex-shrink-0"></span>
-                    <span class="text-red-600 dark:text-red-400 font-semibold">经过特殊处理，无法退出工作空间，介意勿拍</span>
+                <ul
+                  v-if="plan.showNoticeInCatalog && plan.notice?.length"
+                  class="space-y-3.5 text-[14px] text-[#1d1d1f]/70 dark:text-white/70 leading-relaxed"
+                >
+                  <li v-for="(item, idx) in plan.notice" :key="idx" class="flex items-start gap-3">
+                    <span
+                      class="h-1.5 w-1.5 rounded-full mt-2 flex-shrink-0"
+                      :class="item.red ? 'bg-[#FF3B30]' : 'bg-[#007AFF]'"
+                    ></span>
+                    <span :class="[{ 'text-[#FF3B30] font-semibold': item.red, 'font-semibold': item.bold }]">
+                      {{ item.text }}
+                    </span>
                   </li>
                 </ul>
               </div>

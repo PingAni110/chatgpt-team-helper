@@ -153,6 +153,7 @@ const getPurchasePlans = async (db) => {
     isActive: product.isActive !== false,
     isNoWarranty: Boolean(product.isNoWarranty),
     isAntiBan: Boolean(product.isAntiBan),
+    showNoticeInCatalog: Boolean(product.showNoticeInCatalog),
     notice: product.notice
   }))
 
@@ -1114,6 +1115,7 @@ router.get('/meta', async (req, res) => {
           sortOrder: plan.sortOrder,
           isNoWarranty,
           isAntiBan,
+          showNoticeInCatalog: Boolean(plan.showNoticeInCatalog),
           notice: normalizePurchaseNotice(plan.notice),
           availableCount: isAntiBan ? antiBanAvailableCount : availableCount,
           buyerRewardPoints: isNoWarranty ? NO_WARRANTY_REWARD_POINTS : getPurchaseOrderRewardPoints(),

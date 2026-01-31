@@ -435,6 +435,7 @@ export interface PurchasePlan {
   sortOrder?: number
   isNoWarranty?: boolean
   isAntiBan?: boolean
+  showNoticeInCatalog?: boolean
   notice?: Array<{
     text: string
     bold?: boolean
@@ -846,6 +847,7 @@ export interface AdminPurchaseSettingsResponse {
       isActive?: boolean
       isNoWarranty?: boolean
       isAntiBan?: boolean
+      showNoticeInCatalog?: boolean
       notice?: Array<{
         text: string
         bold?: boolean
@@ -1082,6 +1084,7 @@ export const adminService = {
       isActive?: boolean
       isNoWarranty?: boolean
       isAntiBan?: boolean
+      showNoticeInCatalog?: boolean
       notice?: Array<{
         text: string
         bold?: boolean
