@@ -21,6 +21,7 @@ import { getTelegramSettings, getTelegramSettingsFromEnv, invalidateTelegramSett
 import { getFeatureFlags, invalidateFeatureFlagsCache } from '../utils/feature-flags.js'
 import { withLocks } from '../utils/locks.js'
 import { redeemCodeInternal } from './redemption-codes.js'
+import { getPurchaseSettings, getPurchaseSettingsFromEnv, invalidatePurchaseSettingsCache } from '../utils/purchase-settings.js'
 
 const router = express.Router()
 
@@ -61,6 +62,14 @@ const normalizeAdminMenuPath = (value) => {
 const toInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10)
   return Number.isFinite(parsed) ? parsed : fallback
+}
+
+const normalizeMoney = (value, fallback) => {
+  const raw = String(value ?? '').trim()
+  if (!raw) return fallback
+  const parsed = Number.parseFloat(raw)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+  return parsed.toFixed(2)
 }
 
 const ORDER_TYPE_WARRANTY = 'warranty'
@@ -677,6 +686,88 @@ router.put('/zpay-settings', async (req, res) => {
     })
   } catch (error) {
     console.error('Update zpay-settings error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+router.get('/purchase-settings', async (req, res) => {
+  try {
+    const db = await getDatabase()
+    const settings = await getPurchaseSettings(db, { forceRefresh: true })
+
+    res.json({
+      purchase: {
+        expireMinutes: settings.expireMinutes,
+        plans: settings.plans,
+        stored: settings.stored
+      }
+    })
+  } catch (error) {
+    console.error('Get purchase-settings error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+router.put('/purchase-settings', async (req, res) => {
+  try {
+    const payload = req.body?.purchase && typeof req.body.purchase === 'object' ? req.body.purchase : (req.body || {})
+    const db = await getDatabase()
+
+    const current = await getPurchaseSettings(db, { forceRefresh: true })
+    const env = getPurchaseSettingsFromEnv()
+
+    const productName = String(payload.productName ?? current.plans.warranty.productName ?? '').trim()
+    if (!productName) {
+      return res.status(400).json({ error: '商品名称不能为空' })
+    }
+    const amount = normalizeMoney(payload.amount ?? current.plans.warranty.amount, env.plans.warranty.amount)
+    const serviceDays = Math.max(1, toInt(payload.serviceDays ?? current.plans.warranty.serviceDays, env.plans.warranty.serviceDays))
+    const expireMinutes = Math.max(5, toInt(payload.expireMinutes ?? current.expireMinutes, env.expireMinutes))
+
+    const noWarrantyProductName = String(payload.noWarrantyProductName ?? current.plans.noWarranty.productName ?? '').trim()
+    if (!noWarrantyProductName) {
+      return res.status(400).json({ error: '无质保商品名称不能为空' })
+    }
+    const noWarrantyAmount = normalizeMoney(payload.noWarrantyAmount ?? current.plans.noWarranty.amount, env.plans.noWarranty.amount)
+    const noWarrantyServiceDays = Math.max(
+      1,
+      toInt(payload.noWarrantyServiceDays ?? current.plans.noWarranty.serviceDays, env.plans.noWarranty.serviceDays)
+    )
+
+    const antiBanProductName = String(payload.antiBanProductName ?? current.plans.antiBan.productName ?? '').trim()
+    if (!antiBanProductName) {
+      return res.status(400).json({ error: '防封禁商品名称不能为空' })
+    }
+    const antiBanAmount = normalizeMoney(payload.antiBanAmount ?? current.plans.antiBan.amount, env.plans.antiBan.amount)
+    const antiBanServiceDays = Math.max(
+      1,
+      toInt(payload.antiBanServiceDays ?? current.plans.antiBan.serviceDays, env.plans.antiBan.serviceDays)
+    )
+
+    upsertSystemConfigValue(db, 'purchase_product_name', productName)
+    upsertSystemConfigValue(db, 'purchase_price', amount)
+    upsertSystemConfigValue(db, 'purchase_service_days', serviceDays)
+    upsertSystemConfigValue(db, 'purchase_order_expire_minutes', expireMinutes)
+    upsertSystemConfigValue(db, 'purchase_no_warranty_product_name', noWarrantyProductName)
+    upsertSystemConfigValue(db, 'purchase_no_warranty_price', noWarrantyAmount)
+    upsertSystemConfigValue(db, 'purchase_no_warranty_service_days', noWarrantyServiceDays)
+    upsertSystemConfigValue(db, 'purchase_anti_ban_product_name', antiBanProductName)
+    upsertSystemConfigValue(db, 'purchase_anti_ban_price', antiBanAmount)
+    upsertSystemConfigValue(db, 'purchase_anti_ban_service_days', antiBanServiceDays)
+
+    saveDatabase()
+    invalidatePurchaseSettingsCache()
+
+    const updated = await getPurchaseSettings(db, { forceRefresh: true })
+    res.json({
+      purchase: {
+        expireMinutes: updated.expireMinutes,
+        plans: updated.plans,
+        stored: updated.stored
+      }
+    })
+  } catch (error) {
+    console.error('Update purchase-settings error:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 })
@@ -2470,7 +2561,7 @@ router.post('/account-recovery/recover', async (req, res) => {
 	          JOIN gpt_accounts ga ON lower(ga.email) = lower(rc.account_email)
 	          WHERE rc.is_redeemed = 0
 	            AND rc.account_email IS NOT NULL
-	            AND COALESCE(ga.user_count, 0) + COALESCE(ga.invite_count, 0) < 6
+	            AND COALESCE(ga.user_count, 0) + COALESCE(ga.invite_count, 0) < 5
 	            AND COALESCE(ga.is_banned, 0) = 0
 	            AND (rc.reserved_for_entry_id IS NULL OR rc.reserved_for_entry_id = 0)
 	            AND (rc.reserved_for_order_no IS NULL OR rc.reserved_for_order_no = '')

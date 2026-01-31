@@ -47,7 +47,7 @@ const resolveDateRange = (query) => {
   return { ok: true, from, to }
 }
 
-const ACCOUNT_CAPACITY = 6
+const ACCOUNT_CAPACITY = 5
 
 router.get('/overview', async (req, res) => {
   const range = resolveDateRange(req.query)

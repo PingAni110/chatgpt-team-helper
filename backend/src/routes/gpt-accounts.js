@@ -71,6 +71,32 @@ const normalizeExpireAt = (value) => {
   return null
 }
 
+const decodeJwtPayload = (token) => {
+  const raw = String(token || '').trim()
+  if (!raw) return null
+  const parts = raw.split('.')
+  if (parts.length < 2) return null
+  const payload = parts[1]
+  if (!payload) return null
+  try {
+    const padded = payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '=')
+    const decoded = Buffer.from(padded, 'base64').toString('utf8')
+    return JSON.parse(decoded)
+  } catch {
+    return null
+  }
+}
+
+const deriveExpireAtFromToken = (token) => {
+  const payload = decodeJwtPayload(token)
+  if (!payload || typeof payload !== 'object') return null
+  const exp = Number(payload.exp)
+  if (!Number.isFinite(exp) || exp <= 0) return null
+  const date = new Date(exp * 1000)
+  if (Number.isNaN(date.getTime())) return null
+  return formatExpireAt(date)
+}
+
 const collectEmails = (payload) => {
   if (!payload) return []
   if (Array.isArray(payload)) return payload
@@ -214,6 +240,61 @@ router.get('/', async (req, res) => {
   }
 })
 
+// 同步全部账号数据
+router.post('/sync-all', async (req, res) => {
+  try {
+    const db = await getDatabase()
+    const rows = db.exec(`
+      SELECT id, email
+      FROM gpt_accounts
+      ORDER BY created_at DESC
+    `)[0]?.values || []
+
+    const results = []
+    for (const row of rows) {
+      const accountId = Number(row[0])
+      const email = String(row[1] || '')
+      if (!Number.isFinite(accountId)) continue
+
+      try {
+        const userSync = await syncAccountUserCount(accountId)
+        const inviteSync = await syncAccountInviteCount(accountId, {
+          accountRecord: userSync.account,
+          inviteListParams: { offset: 0, limit: 1, query: '' }
+        })
+        results.push({
+          id: accountId,
+          email,
+          syncedUserCount: userSync.syncedUserCount,
+          inviteCount: inviteSync.inviteCount,
+          account: inviteSync.account,
+          ok: true
+        })
+      } catch (error) {
+        results.push({
+          id: accountId,
+          email,
+          ok: false,
+          error: error instanceof AccountSyncError ? error.message : (error?.message || '同步失败')
+        })
+      }
+    }
+
+    const successCount = results.filter(item => item.ok).length
+    const failureCount = results.length - successCount
+
+    res.json({
+      total: results.length,
+      successCount,
+      failureCount,
+      results
+    })
+  } catch (error) {
+    console.error('Sync all accounts error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 // Get a single GPT account
 router.get('/:id', async (req, res) => {
   try {
@@ -280,13 +361,16 @@ router.post('/', async (req, res) => {
 
     const normalizedChatgptAccountId = String(chatgptAccountId ?? '').trim()
     const normalizedOaiDeviceId = String(oaiDeviceId ?? '').trim()
-    const normalizedExpireAt = normalizeExpireAt(expireAt)
+    const hasExpireAt = Object.prototype.hasOwnProperty.call(body, 'expireAt')
+    const normalizedExpireAt = hasExpireAt ? normalizeExpireAt(expireAt) : null
+    const derivedExpireAt = !hasExpireAt ? deriveExpireAtFromToken(token) : null
+    const finalExpireAt = hasExpireAt ? normalizedExpireAt : derivedExpireAt
 
     if (!email || !token || !normalizedChatgptAccountId) {
       return res.status(400).json({ error: 'Email, token and ChatGPT ID are required' })
     }
 
-    if (expireAt != null && String(expireAt).trim() && !normalizedExpireAt) {
+    if (hasExpireAt && expireAt != null && String(expireAt).trim() && !normalizedExpireAt) {
       return res.status(400).json({
         error: 'Invalid expireAt format',
         message: 'expireAt 格式错误，请使用 YYYY/MM/DD HH:mm'
@@ -302,7 +386,7 @@ router.post('/', async (req, res) => {
 
     db.run(
       `INSERT INTO gpt_accounts (email, token, refresh_token, user_count, chatgpt_account_id, oai_device_id, expire_at, is_demoted, is_banned, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))`,
-      [normalizedEmail, token, refreshToken || null, finalUserCount, normalizedChatgptAccountId, normalizedOaiDeviceId || null, normalizedExpireAt, isDemotedValue, isBannedValue]
+      [normalizedEmail, token, refreshToken || null, finalUserCount, normalizedChatgptAccountId, normalizedOaiDeviceId || null, finalExpireAt, isDemotedValue, isBannedValue]
     )
 
 		    // 获取新创建账号的ID
@@ -346,9 +430,12 @@ router.post('/', async (req, res) => {
       return code
     }
 
-    // 自动生成5个兑换码并绑定到该账号
+    const totalCapacity = 5
+    const availableSlots = Math.max(0, totalCapacity - Math.max(0, finalUserCount))
+
+    // 自动生成兑换码并绑定到该账号
     const generatedCodes = []
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < availableSlots; i++) {
       let code = generateRedemptionCode()
       let attempts = 0
       let success = false

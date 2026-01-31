@@ -17,6 +17,8 @@ import AccountsView from '../views/AccountsView.vue'
 import UserManagementView from '../views/UserManagementView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import RedemptionCodesView from '../views/RedemptionCodesView.vue'
+import MemberListView from '../views/MemberListView.vue'
+import ProductManagementView from '../views/ProductManagementView.vue'
 import AppleShowcase from '../views/AppleShowcase.vue'
 import WaitingRoomAdminView from '../views/WaitingRoomAdminView.vue'
 import XhsOrdersView from '../views/XhsOrdersView.vue'
@@ -163,6 +165,12 @@ const router = createRouter({
           meta: { requiredMenuKey: 'accounts' },
         },
         {
+          path: 'members',
+          name: 'member-list',
+          component: MemberListView,
+          meta: { requiredMenuKey: 'member_list' },
+        },
+        {
           path: 'account-recovery',
           name: 'account-recovery-admin',
           component: AccountRecoveryAdminView,
@@ -203,6 +211,12 @@ const router = createRouter({
           name: 'purchase-orders',
           component: PurchaseOrdersView,
           meta: { requiredMenuKey: 'purchase_orders', featureKey: 'payment' },
+        },
+        {
+          path: 'products',
+          name: 'product-management',
+          component: ProductManagementView,
+          meta: { requiredMenuKey: 'product_management', featureKey: 'payment' },
         },
         {
           path: 'credit-orders',

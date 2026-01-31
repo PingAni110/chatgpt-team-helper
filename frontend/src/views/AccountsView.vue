@@ -79,6 +79,9 @@ const totalPages = computed(() => Math.max(1, Math.ceil(paginationMeta.value.tot
 
 // 同步相关状态
 const syncingAccountId = ref<number | null>(null)
+const syncingAll = ref(false)
+const autoExpireAtUpdate = ref(false)
+const expireAtManuallyEdited = ref(false)
 const showSyncResultDialog = ref(false)
 const syncResult = ref<SyncUserCountResponse | null>(null)
 const syncError = ref('')
@@ -112,6 +115,37 @@ const formData = ref<CreateGptAccountDto>({
   oaiDeviceId: '',
   expireAt: ''
 })
+
+const formatDatetimeLocal = (date: Date) => {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+const decodeJwtPayload = (token: string) => {
+  const raw = String(token || '').trim()
+  if (!raw) return null
+  const parts = raw.split('.')
+  if (parts.length < 2) return null
+  const payload = parts[1]
+  if (!payload) return null
+  try {
+    const padded = payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '=')
+    const decoded = atob(padded)
+    return JSON.parse(decoded)
+  } catch {
+    return null
+  }
+}
+
+const deriveExpireAtFromToken = (token: string) => {
+  const payload = decodeJwtPayload(token)
+  if (!payload || typeof payload !== 'object') return null
+  const exp = Number(payload.exp)
+  if (!Number.isFinite(exp) || exp <= 0) return null
+  const date = new Date(exp * 1000)
+  if (Number.isNaN(date.getTime())) return null
+  return formatDatetimeLocal(date)
+}
 
 // 转换存储格式 (YYYY/MM/DD HH:mm:ss) 为 datetime-local 格式 (YYYY-MM-DDTHH:mm:ss)
 const toDatetimeLocal = (expireAt: string): string => {
@@ -209,6 +243,29 @@ watch(searchQuery, () => {
   }, 300)
 })
 
+watch(
+  () => formData.value.expireAt,
+  () => {
+    if (autoExpireAtUpdate.value) {
+      autoExpireAtUpdate.value = false
+      return
+    }
+    expireAtManuallyEdited.value = Boolean(formData.value.expireAt)
+  }
+)
+
+watch(
+  () => formData.value.token,
+  (token) => {
+    if (editingAccount.value) return
+    if (expireAtManuallyEdited.value) return
+    const derived = deriveExpireAtFromToken(token || '')
+    if (!derived) return
+    autoExpireAtUpdate.value = true
+    formData.value.expireAt = derived
+  }
+)
+
 const openEditDialog = (account: GptAccount) => {
   editingAccount.value = account
   formData.value = {
@@ -222,6 +279,7 @@ const openEditDialog = (account: GptAccount) => {
     oaiDeviceId: account.oaiDeviceId || '',
     expireAt: toDatetimeLocal(account.expireAt || '')
   }
+  expireAtManuallyEdited.value = true
   showDialog.value = true
 }
 
@@ -229,6 +287,7 @@ const closeDialog = () => {
   showDialog.value = false
   editingAccount.value = null
   formData.value = { email: '', token: '', refreshToken: '', userCount: 0, isDemoted: false, isBanned: false, chatgptAccountId: '', oaiDeviceId: '', expireAt: '' }
+  expireAtManuallyEdited.value = false
 }
 
 const handleSubmit = async () => {
@@ -423,6 +482,24 @@ const handleSyncUserCount = async (account: GptAccount) => {
   }
 }
 
+const handleSyncAll = async () => {
+  if (!confirm('确定同步所有空间的成员数据吗？')) return
+  syncingAll.value = true
+  try {
+    const result = await gptAccountService.syncAll()
+    if (result.failureCount > 0) {
+      showErrorToast(`同步完成：成功 ${result.successCount} 个，失败 ${result.failureCount} 个`)
+    } else {
+      showSuccessToast(`同步完成：成功 ${result.successCount} 个`)
+    }
+    await loadAccounts()
+  } catch (err: any) {
+    showErrorToast(err.response?.data?.error || '同步失败，请稍后再试')
+  } finally {
+    syncingAll.value = false
+  }
+}
+
 const loadInvites = async (accountId: number) => {
   loadingInvites.value = true
   try {
@@ -570,13 +647,24 @@ const handleInviteSubmit = async () => {
   <div class="space-y-8">
     <!-- Header Actions -->
     <Teleport v-if="teleportReady" to="#header-actions">
-      <Button
-        @click="showDialog = true"
-        class="bg-black hover:bg-gray-800 text-white rounded-xl px-5 h-10 shadow-lg shadow-black/10 transition-all hover:scale-[1.02] active:scale-[0.98]"
-      >
-        <Plus class="w-4 h-4 mr-2" />
-        新建账号
-      </Button>
+      <div class="flex items-center gap-3">
+        <Button
+          variant="outline"
+          class="rounded-xl px-5 h-10 border-gray-200 text-gray-700 hover:text-gray-900"
+          :disabled="syncingAll"
+          @click="handleSyncAll"
+        >
+          <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': syncingAll }" />
+          同步全部空间
+        </Button>
+        <Button
+          @click="showDialog = true"
+          class="bg-black hover:bg-gray-800 text-white rounded-xl px-5 h-10 shadow-lg shadow-black/10 transition-all hover:scale-[1.02] active:scale-[0.98]"
+        >
+          <Plus class="w-4 h-4 mr-2" />
+          新建账号
+        </Button>
+      </div>
     </Teleport>
 
     <!-- 筛选控制栏 -->
@@ -646,7 +734,6 @@ const handleInviteSubmit = async () => {
                 <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">待加入</th>
                 <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">降级</th>
                 <th class="px-6 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">过期时间</th>
-                <th class="px-6 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">创建时间</th>
                 <th class="px-6 py-5 text-right text-xs font-semibold text-gray-400 uppercase tracking-wider">操作</th>
               </tr>
             </thead>
@@ -689,7 +776,6 @@ const handleInviteSubmit = async () => {
                   </span>
                 </td>
                 <td class="px-6 py-5 text-sm text-gray-500 font-mono">{{ account.expireAt || '-' }}</td>
-                <td class="px-6 py-5 text-sm text-gray-500">{{ formatShanghaiDate(account.createdAt, dateFormatOptions) }}</td>
                 <td class="px-6 py-5 text-right">
                   <div class="flex items-center justify-end gap-1">
                     <!-- Toggle Open -->
@@ -796,10 +882,6 @@ const handleInviteSubmit = async () => {
           <div>
                   <p class="mb-1 text-gray-400">过期时间</p>
                   <p class="font-mono text-gray-700">{{ account.expireAt || '-' }}</p>
-               </div>
-               <div>
-                  <p class="mb-1 text-gray-400">创建时间</p>
-                  <p class="text-gray-700">{{ formatShanghaiDate(account.createdAt, dateFormatOptions).split(' ')[0] }}</p>
                </div>
             </div>
 

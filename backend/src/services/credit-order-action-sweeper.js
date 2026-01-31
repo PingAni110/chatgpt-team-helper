@@ -317,8 +317,8 @@ const fulfillOpenAccountsBoardOrder = async (db, row) => {
     const invites = await fetchAccountInvites(targetAccountId, { inviteListParams: { offset: 0, limit: 25, query: email } })
     const isInvited = (invites.items || []).some(item => normalizeEmail(item.email_address) === email)
 
-    const baseCapacity = isAntiBanOrderType(effectiveOrderType) ? 6 : 5
-    const redeemCapacity = isMember || isInvited ? Math.max(baseCapacity, 6) : baseCapacity
+    const baseCapacity = 5
+    const redeemCapacity = isMember || isInvited ? Math.max(baseCapacity, 5) : baseCapacity
     const redeemOutcome = await redeemOpenAccountsOrderCode(db, {
       orderNo,
       uid,

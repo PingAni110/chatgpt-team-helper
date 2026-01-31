@@ -297,13 +297,13 @@ router.post('/', apiKeyAuth, async (req, res) => {
         updatedAt: row[10]
       }
 
-      // 自动生成兑换码，数量为可用名额
-      // 可用名额 = 总容量(5) - 当前人数(1) - 所有兑换码数(0) = 4
+      const { account: responseAccount, syncResult, removedUsers } = await syncAccountAndCleanup(account)
+
+      // 自动生成兑换码：可用名额 = 总容量(5) - 当前成员数
       const totalCapacity = 5
-      const currentUserCount = 1  // 刚创建的账号默认人数为1
-      const allCodesCount = 0  // 新账号还没有任何兑换码
-      const availableSlots = totalCapacity - currentUserCount - allCodesCount
-      const codesToGenerate = Math.min(4, availableSlots)  // 生成4个兑换码（正好填满可用名额）
+      const currentUserCount = Math.max(0, Number(responseAccount.userCount ?? account.userCount ?? 0))
+      const availableSlots = Math.max(0, totalCapacity - currentUserCount)
+      const codesToGenerate = availableSlots
 
       const generatedCodes = []
       for (let i = 0; i < codesToGenerate; i++) {
@@ -314,13 +314,13 @@ router.post('/', apiKeyAuth, async (req, res) => {
         // 尝试生成唯一的兑换码（最多重试4次）
         while (attempts < 4 && !success) {
           try {
-	            db.run(
-	              `INSERT INTO redemption_codes (code, account_email, created_at, updated_at) VALUES (?, ?, DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))`,
-	              [code, normalizedEmail]
-	            )
-	            generatedCodes.push(code)
-	            success = true
-	          } catch (err) {
+            db.run(
+              `INSERT INTO redemption_codes (code, account_email, created_at, updated_at) VALUES (?, ?, DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))`,
+              [code, normalizedEmail]
+            )
+            generatedCodes.push(code)
+            success = true
+          } catch (err) {
             if (err.message.includes('UNIQUE')) {
               // 如果重复，重新生成
               code = generateRedemptionCode()
@@ -333,8 +333,6 @@ router.post('/', apiKeyAuth, async (req, res) => {
       }
 
       saveDatabase()
-
-      const { account: responseAccount, syncResult, removedUsers } = await syncAccountAndCleanup(account)
 
       return res.status(201).json({
         success: true,

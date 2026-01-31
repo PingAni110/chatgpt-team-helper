@@ -248,7 +248,7 @@ function selectAccountForCode(db, accountEmail) {
       SELECT id, email, token, user_count, chatgpt_account_id, oai_device_id
       FROM gpt_accounts
       WHERE email = ?
-        AND COALESCE(user_count, 0) + COALESCE(invite_count, 0) < 6
+        AND COALESCE(user_count, 0) + COALESCE(invite_count, 0) < 5
       LIMIT 1
       `,
       [accountEmail]
@@ -263,7 +263,7 @@ function selectAccountForCode(db, accountEmail) {
     `
       SELECT id, email, token, user_count, chatgpt_account_id, oai_device_id
       FROM gpt_accounts
-      WHERE COALESCE(user_count, 0) + COALESCE(invite_count, 0) < 6
+      WHERE COALESCE(user_count, 0) + COALESCE(invite_count, 0) < 5
       ORDER BY COALESCE(user_count, 0) + COALESCE(invite_count, 0) ASC, RANDOM()
       LIMIT 1
     `

@@ -6,7 +6,7 @@ import { sendOpenAccountsSweeperReportEmail } from './email-service.js'
 import { getFeatureFlags, isFeatureEnabled } from '../utils/feature-flags.js'
 
 const DEFAULT_INTERVAL_HOURS = 1
-const DEFAULT_MAX_JOINED = 6
+const DEFAULT_MAX_JOINED = 5
 const DEFAULT_CREATED_WITHIN_DAYS = 15
 
 const toInt = (value, fallback) => {

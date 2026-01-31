@@ -407,12 +407,7 @@ router.get('/', authenticateLinuxDoSession, async (req, res) => {
         ) code_stats ON lower(ga.email) = code_stats.account_email_lower
         WHERE ga.is_open = 1
           AND COALESCE(ga.is_banned, 0) = 0
-          AND (
-            CASE
-              WHEN COALESCE(ga.is_demoted, 0) = 1 THEN (COALESCE(ga.user_count, 0) + COALESCE(ga.invite_count, 0)) < 6
-              ELSE (COALESCE(ga.user_count, 0) + COALESCE(ga.invite_count, 0)) < 5
-            END
-          )
+          AND (COALESCE(ga.user_count, 0) + COALESCE(ga.invite_count, 0)) < 5
           ${threshold ? "AND ga.created_at >= DATETIME('now', 'localtime', ?)" : ''}
         ORDER BY ga.created_at DESC
       `,
@@ -671,7 +666,7 @@ router.post('/:accountId/board', authenticateLinuxDoSession, async (req, res) =>
               uid,
               email: orderEmail,
               accountEmail,
-              capacityLimit: 6,
+              capacityLimit: 5,
               orderType: verifiedOrderType
             })
             if (!redeemOutcome.ok) {
@@ -736,7 +731,7 @@ router.post('/:accountId/board', authenticateLinuxDoSession, async (req, res) =>
             return { type: 'error', status: 500, error: '未配置上车所需积分' }
           }
 
-          const baseCapacity = isDemoted ? 6 : 5
+          const baseCapacity = 5
           // 若用户尚未在目标账号的成员/邀请列表中，且账号已满员，则不创建订单，避免授权后无法上车。
           if (!isMember && !isInvited) {
             const seatsUsed = Number(account.userCount || 0) + Number(account.inviteCount || 0)
@@ -861,8 +856,8 @@ router.post('/:accountId/board', authenticateLinuxDoSession, async (req, res) =>
           }
         }
 
-        const baseCapacity = isDemoted ? 6 : 5
-        const redeemCapacity = isMember || isInvited ? Math.max(baseCapacity, 6) : baseCapacity
+        const baseCapacity = 5
+        const redeemCapacity = isMember || isInvited ? Math.max(baseCapacity, 5) : baseCapacity
         const redeemOutcome = await redeemOpenAccountsOrderCode(db, {
           orderNo: verifiedCreditOrderNo,
           uid,

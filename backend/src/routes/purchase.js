@@ -10,6 +10,7 @@ import { sendPurchaseOrderEmail } from '../services/email-service.js'
 import { redeemCodeInternal, RedemptionError } from './redemption-codes.js'
 import { safeInsertPointsLedgerEntry } from '../utils/points-ledger.js'
 import { getZpaySettings } from '../utils/zpay-settings.js'
+import { getPurchaseSettings } from '../utils/purchase-settings.js'
 import { sendTelegramBotNotification } from '../services/telegram-notifier.js'
 import { requireFeatureEnabled } from '../middleware/feature-flags.js'
 
@@ -139,52 +140,36 @@ const normalizeOrderType = (value) => {
   return ORDER_TYPE_SET.has(normalized) ? normalized : ORDER_TYPE_WARRANTY
 }
 
-const getPurchasePlans = () => {
-  const productName = String(process.env.PURCHASE_PRODUCT_NAME || '通用渠道激活码').trim() || '通用渠道激活码'
-  const amount = formatMoney(process.env.PURCHASE_PRICE ?? '1.00') || '1.00'
-  const serviceDays = Math.max(1, toInt(process.env.PURCHASE_SERVICE_DAYS, 30))
-  const expireMinutes = Math.max(5, toInt(process.env.PURCHASE_ORDER_EXPIRE_MINUTES, 15))
-
-  const noWarrantyAmount = formatMoney(process.env.PURCHASE_NO_WARRANTY_PRICE ?? '5.00') || '5.00'
-  const noWarrantyServiceDays = Math.max(1, toInt(process.env.PURCHASE_NO_WARRANTY_SERVICE_DAYS, serviceDays))
-  const noWarrantyProductName = String(
-    process.env.PURCHASE_NO_WARRANTY_PRODUCT_NAME || `${productName}（无质保）`
-  ).trim() || `${productName}（无质保）`
-
-  const antiBanAmount = formatMoney(process.env.PURCHASE_ANTI_BAN_PRICE ?? '10.00') || '10.00'
-  const antiBanServiceDays = Math.max(1, toInt(process.env.PURCHASE_ANTI_BAN_SERVICE_DAYS, serviceDays))
-  const antiBanProductName = String(
-    process.env.PURCHASE_ANTI_BAN_PRODUCT_NAME || `${productName}(防封禁)`
-  ).trim() || `${productName}(防封禁)`
-
+const getPurchasePlans = async (db) => {
+  const settings = await getPurchaseSettings(db)
   return {
-    expireMinutes,
+    expireMinutes: settings.expireMinutes,
     plans: {
       warranty: {
         key: ORDER_TYPE_WARRANTY,
-        productName,
-        amount,
-        serviceDays
+        productName: settings.plans.warranty.productName,
+        amount: formatMoney(settings.plans.warranty.amount) || '1.00',
+        serviceDays: settings.plans.warranty.serviceDays
       },
       noWarranty: {
         key: ORDER_TYPE_NO_WARRANTY,
-        productName: noWarrantyProductName,
-        amount: noWarrantyAmount,
-        serviceDays: noWarrantyServiceDays
+        productName: settings.plans.noWarranty.productName,
+        amount: formatMoney(settings.plans.noWarranty.amount) || '5.00',
+        serviceDays: settings.plans.noWarranty.serviceDays
       },
       antiBan: {
         key: ORDER_TYPE_ANTI_BAN,
-        productName: antiBanProductName,
-        amount: antiBanAmount,
-        serviceDays: antiBanServiceDays
+        productName: settings.plans.antiBan.productName,
+        amount: formatMoney(settings.plans.antiBan.amount) || '10.00',
+        serviceDays: settings.plans.antiBan.serviceDays
       }
     }
   }
 }
 
-const getPurchasePlan = (orderType) => {
+const getPurchasePlan = async (orderType, db) => {
   const normalized = normalizeOrderType(orderType)
-  const { plans } = getPurchasePlans()
+  const { plans } = await getPurchasePlans(db)
   if (normalized === ORDER_TYPE_NO_WARRANTY) return plans.noWarranty
   if (normalized === ORDER_TYPE_ANTI_BAN) return plans.antiBan
   return plans.warranty
@@ -406,7 +391,7 @@ const getTodayAvailableCodeCount = (db) => {
         AND rc.account_email IS NOT NULL
         AND ga.is_open = 1
         AND COALESCE(ga.is_demoted, 0) = 0
-        AND ga.user_count < 6
+        AND ga.user_count < 5
         AND DATE(ga.created_at) = DATE('now', 'localtime')
         AND (rc.reserved_for_order_no IS NULL OR rc.reserved_for_order_no = '')
         AND (rc.reserved_for_entry_id IS NULL OR rc.reserved_for_entry_id = 0)
@@ -426,7 +411,7 @@ const reserveTodayCode = (db, { orderNo, email }) => {
         AND rc.account_email IS NOT NULL
         AND ga.is_open = 1
         AND COALESCE(ga.is_demoted, 0) = 0
-        AND ga.user_count < 6
+        AND ga.user_count < 5
         AND DATE(ga.created_at) = DATE('now', 'localtime')
         AND (rc.reserved_for_order_no IS NULL OR rc.reserved_for_order_no = '')
         AND (rc.reserved_for_entry_id IS NULL OR rc.reserved_for_entry_id = 0)
@@ -1037,7 +1022,7 @@ const getDemotedAvailableCodeCount = (db) => {
         AND rc.account_email IS NOT NULL
         AND ga.is_open = 1
         AND COALESCE(ga.is_demoted, 0) = 1
-        AND ga.user_count < 6
+        AND ga.user_count < 5
         AND DATE(ga.created_at) = DATE('now', 'localtime')
         AND (rc.reserved_for_order_no IS NULL OR rc.reserved_for_order_no = '')
         AND (rc.reserved_for_entry_id IS NULL OR rc.reserved_for_entry_id = 0)
@@ -1057,7 +1042,7 @@ const reserveDemotedCode = (db, { orderNo, email }) => {
         AND rc.account_email IS NOT NULL
         AND ga.is_open = 1
         AND COALESCE(ga.is_demoted, 0) = 1
-        AND ga.user_count < 6
+        AND ga.user_count < 5
         AND DATE(ga.created_at) = DATE('now', 'localtime')
         AND (rc.reserved_for_order_no IS NULL OR rc.reserved_for_order_no = '')
         AND (rc.reserved_for_entry_id IS NULL OR rc.reserved_for_entry_id = 0)
@@ -1088,8 +1073,8 @@ const reserveDemotedCode = (db, { orderNo, email }) => {
 
 router.get('/meta', async (req, res) => {
   try {
-    const { plans, expireMinutes } = getPurchasePlans()
     const db = await getDatabase()
+    const { plans, expireMinutes } = await getPurchasePlans(db)
     await withLocks(['purchase'], async () => {
       const released = cleanupExpiredOrders(db, { expireMinutes })
       if (released) {
@@ -1156,12 +1141,12 @@ router.post('/orders', async (req, res) => {
     return res.status(500).json({ error: '支付未配置，请联系管理员' })
   }
 
-  const purchasePlans = getPurchasePlans()
-  const purchasePlan = getPurchasePlan(orderType)
   const orderNo = generateOrderNo()
 
   try {
     const db = await getDatabase()
+    const purchasePlans = await getPurchasePlans(db)
+    const purchasePlan = await getPurchasePlan(orderType, db)
 
     const reservation = await withLocks(['purchase'], async () => {
       cleanupExpiredOrders(db, { expireMinutes: purchasePlans.expireMinutes })

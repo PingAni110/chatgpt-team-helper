@@ -333,6 +333,21 @@ export interface SyncUserCountResponse {
   users: ChatgptAccountUsersResponse
 }
 
+export interface SyncAllAccountsResponse {
+  total: number
+  successCount: number
+  failureCount: number
+  results: Array<{
+    id: number
+    email: string
+    syncedUserCount?: number
+    inviteCount?: number
+    account?: GptAccount
+    ok: boolean
+    error?: string
+  }>
+}
+
 export interface InviteUserResponse {
   message: string
   invite: any
@@ -806,6 +821,29 @@ export interface AdminZpaySettingsResponse {
   }
 }
 
+export interface AdminPurchaseSettingsResponse {
+  purchase: {
+    expireMinutes: number
+    plans: {
+      warranty: PurchasePlan
+      noWarranty: PurchasePlan
+      antiBan: PurchasePlan
+    }
+    stored?: {
+      productName?: boolean
+      amount?: boolean
+      serviceDays?: boolean
+      expireMinutes?: boolean
+      noWarrantyProductName?: boolean
+      noWarrantyAmount?: boolean
+      noWarrantyServiceDays?: boolean
+      antiBanProductName?: boolean
+      antiBanAmount?: boolean
+      antiBanServiceDays?: boolean
+    }
+  }
+}
+
 export interface AdminTurnstileSettingsResponse {
   turnstile: {
     siteKey: string
@@ -1001,6 +1039,29 @@ export const adminService = {
 
   async updateZpaySettings(payload: { zpay: { baseUrl: string; pid: string; key?: string } }): Promise<AdminZpaySettingsResponse> {
     const response = await api.put('/admin/zpay-settings', payload)
+    return response.data
+  },
+
+  async getPurchaseSettings(): Promise<AdminPurchaseSettingsResponse> {
+    const response = await api.get('/admin/purchase-settings')
+    return response.data
+  },
+
+  async updatePurchaseSettings(payload: {
+    productName: string
+    amount: string
+    serviceDays: number
+    expireMinutes: number
+    noWarrantyProductName: string
+    noWarrantyAmount: string
+    noWarrantyServiceDays: number
+    antiBanProductName: string
+    antiBanAmount: string
+    antiBanServiceDays: number
+  }): Promise<AdminPurchaseSettingsResponse> {
+    const response = await api.put('/admin/purchase-settings', {
+      purchase: payload
+    })
     return response.data
   },
 
@@ -1326,6 +1387,11 @@ export const gptAccountService = {
 
   async syncUserCount(id: number): Promise<SyncUserCountResponse> {
     const response = await api.post(`/gpt-accounts/${id}/sync-user-count`)
+    return response.data
+  },
+
+  async syncAll(): Promise<SyncAllAccountsResponse> {
+    const response = await api.post('/gpt-accounts/sync-all')
     return response.data
   },
 

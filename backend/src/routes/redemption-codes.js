@@ -196,7 +196,7 @@ export async function redeemCodeInternal({
   channel = 'common',
   orderType,
   redeemerUid,
-  capacityLimit = 6,
+  capacityLimit = 5,
   skipCodeFormatValidation = false,
   allowCommonChannelFallback = false,
 }) {
@@ -354,7 +354,7 @@ export async function redeemCodeInternal({
 
   let accountResult
 
-  const maxSeats = Math.max(1, Number(capacityLimit) || 6)
+  const maxSeats = Math.max(1, Number(capacityLimit) || 5)
 
   if (boundAccountEmail) {
     accountResult = db.exec(`
@@ -1267,7 +1267,7 @@ router.post('/recover', async (req, res) => {
           JOIN gpt_accounts ga ON lower(ga.email) = lower(rc.account_email)
           WHERE rc.is_redeemed = 0
             AND rc.account_email IS NOT NULL
-            AND COALESCE(ga.user_count, 0) + COALESCE(ga.invite_count, 0) < 6
+            AND COALESCE(ga.user_count, 0) + COALESCE(ga.invite_count, 0) < 5
             AND COALESCE(ga.is_banned, 0) = 0
             AND (rc.reserved_for_entry_id IS NULL OR rc.reserved_for_entry_id = 0)
             AND (rc.reserved_for_order_no IS NULL OR rc.reserved_for_order_no = '')

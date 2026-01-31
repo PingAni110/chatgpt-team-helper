@@ -1474,7 +1474,7 @@ const handleInviteSubmit = async () => {
                 </SelectContent>
               </Select>
               <p class="text-xs text-gray-400">
-                可创建数量 = 6 - 当前人数 - 未使用的兑换码数。
+                可创建数量 = 5 - 当前人数 - 未使用的兑换码数。
               </p>
            </div>
 
