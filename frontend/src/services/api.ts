@@ -440,6 +440,7 @@ export interface PurchasePlan {
     text: string
     bold?: boolean
     red?: boolean
+    showNoticeInCatalog?: boolean
   }>
   buyerRewardPoints?: number
   inviteRewardPoints?: number
@@ -852,6 +853,7 @@ export interface AdminPurchaseSettingsResponse {
         text: string
         bold?: boolean
         red?: boolean
+        showNoticeInCatalog?: boolean
       }>
     }>
     stored?: {
@@ -1089,6 +1091,7 @@ export const adminService = {
         text: string
         bold?: boolean
         red?: boolean
+        showNoticeInCatalog?: boolean
       }>
     }>
   }): Promise<AdminPurchaseSettingsResponse> {

@@ -70,10 +70,10 @@
                 </div>
 
                 <ul
-                  v-if="plan.showNoticeInCatalog && plan.notice?.length"
+                  v-if="plan.showNoticeInCatalog && getCatalogNoticeItems(plan).length"
                   class="space-y-3.5 text-[14px] text-[#1d1d1f]/70 dark:text-white/70 leading-relaxed"
                 >
-                  <li v-for="(item, idx) in plan.notice" :key="idx" class="flex items-start gap-3">
+                  <li v-for="(item, idx) in getCatalogNoticeItems(plan)" :key="idx" class="flex items-start gap-3">
                     <span
                       class="h-1.5 w-1.5 rounded-full mt-2 flex-shrink-0"
                       :class="item.red ? 'bg-[#FF3B30]' : 'bg-[#007AFF]'"
@@ -118,6 +118,10 @@ const plans = computed<PurchasePlan[]>(() => {
     return String(a.key || '').localeCompare(String(b.key || ''))
   })
 })
+
+const getCatalogNoticeItems = (plan: PurchasePlan) => (
+  (plan.notice || []).filter(item => item.showNoticeInCatalog !== false && String(item.text || '').trim())
+)
 
 const loadMeta = async () => {
   if (loading.value) return

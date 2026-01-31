@@ -28,6 +28,7 @@ const formData = ref({
       text: string
       bold?: boolean
       red?: boolean
+      showNoticeInCatalog?: boolean
     }>
   }>
 })
@@ -50,7 +51,14 @@ const loadSettings = async () => {
         isNoWarranty: Boolean(item.isNoWarranty),
         isAntiBan: Boolean(item.isAntiBan),
         showNoticeInCatalog: Boolean(item.showNoticeInCatalog),
-        notice: Array.isArray(item.notice) ? item.notice : []
+        notice: Array.isArray(item.notice)
+          ? item.notice.map(notice => ({
+            text: notice.text,
+            bold: Boolean(notice.bold),
+            red: Boolean(notice.red),
+            showNoticeInCatalog: notice.showNoticeInCatalog !== false
+          }))
+          : []
       }))
     }
   } catch (err: any) {
@@ -100,7 +108,7 @@ const addProduct = () => {
 
 const addNoticeItem = (product: typeof formData.value.products[number]) => {
   if (!product.notice) product.notice = []
-  product.notice.push({ text: '', bold: false, red: false })
+  product.notice.push({ text: '', bold: false, red: false, showNoticeInCatalog: true })
 }
 
 const removeNoticeItem = (product: typeof formData.value.products[number], index: number) => {
@@ -200,6 +208,10 @@ const removeProduct = (index: number) => {
                   <label class="flex items-center gap-2 text-sm text-gray-600">
                     <input type="checkbox" v-model="noticeItem.red" class="h-4 w-4 rounded border-gray-300" />
                     标红
+                  </label>
+                  <label class="flex items-center gap-2 text-sm text-gray-600">
+                    <input type="checkbox" v-model="noticeItem.showNoticeInCatalog" class="h-4 w-4 rounded border-gray-300" />
+                    展示购前须知
                   </label>
                 </div>
               </div>

@@ -741,7 +741,8 @@ router.put('/purchase-settings', async (req, res) => {
           return {
             text,
             bold: Boolean(item?.bold),
-            red: Boolean(item?.red)
+            red: Boolean(item?.red),
+            showNoticeInCatalog: item?.showNoticeInCatalog !== false
           }
         }
         if (Array.isArray(value)) {

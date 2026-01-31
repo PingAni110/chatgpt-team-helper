@@ -38,7 +38,8 @@ const normalizeNoticeItems = (value, fallback = []) => {
     return {
       text,
       bold: Boolean(item?.bold),
-      red: Boolean(item?.red)
+      red: Boolean(item?.red),
+      showNoticeInCatalog: item?.showNoticeInCatalog !== false
     }
   }
 
