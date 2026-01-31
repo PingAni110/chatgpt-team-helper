@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { authService, gptAccountService, type GptAccount, type CreateGptAccountDto, type SyncUserCountResponse, type GptAccountsListParams, type ChatgptAccountInviteItem } from '@/services/api'
+import { authService, gptAccountService, type GptAccount, type CreateGptAccountDto, type SyncUserCountResponse, type GptAccountsListParams, type ChatgptAccountInviteItem, type ChatgptAccountUser } from '@/services/api'
 import { formatShanghaiDate } from '@/lib/datetime'
 import { useAppConfigStore } from '@/stores/appConfig'
 import {
@@ -104,6 +104,11 @@ const RESYNC_AFTER_ACTION_DELAY_MS = 3000
 let resyncAfterActionTimer: ReturnType<typeof setTimeout> | null = null
 let resyncAfterActionVersion = 0
 
+const memberAccountId = ref<string>('')
+const memberSearch = ref('')
+const memberList = ref<ChatgptAccountUser[]>([])
+const memberListLoading = ref(false)
+
 const formData = ref<CreateGptAccountDto>({
   email: '',
   token: '',
@@ -201,6 +206,13 @@ const loadAccounts = async () => {
     const response = await gptAccountService.getAll(params)
     accounts.value = response.accounts || []
     paginationMeta.value = response.pagination || { page: 1, pageSize: 10, total: 0 }
+    if (!memberAccountId.value && accounts.value.length > 0) {
+      memberAccountId.value = String(accounts.value[0]?.id ?? '')
+      const accountId = Number(memberAccountId.value)
+      if (Number.isFinite(accountId)) {
+        loadMembers(accountId)
+      }
+    }
   } catch (err: any) {
     error.value = err.response?.data?.error || 'Failed to load accounts'
     if (err.response?.status === 401 || err.response?.status === 403) {
@@ -209,6 +221,19 @@ const loadAccounts = async () => {
     }
   } finally {
     loading.value = false
+  }
+}
+
+const loadMembers = async (accountId: number) => {
+  if (!accountId) return
+  memberListLoading.value = true
+  try {
+    const response = await gptAccountService.getMembers(accountId)
+    memberList.value = response.items || []
+  } catch (err: any) {
+    showErrorToast(err.response?.data?.error || '加载成员列表失败')
+  } finally {
+    memberListLoading.value = false
   }
 }
 
@@ -468,6 +493,9 @@ const handleSyncUserCount = async (account: GptAccount) => {
   try {
     const result = await gptAccountService.syncUserCount(account.id)
     applySyncResultToState(result)
+    if (Number(memberAccountId.value) === account.id) {
+      memberList.value = result.users?.items || []
+    }
 
     // 显示同步结果对话框
     showSyncResultDialog.value = true
@@ -493,12 +521,35 @@ const handleSyncAll = async () => {
       showSuccessToast(`同步完成：成功 ${result.successCount} 个`)
     }
     await loadAccounts()
+    const accountId = Number(memberAccountId.value)
+    if (Number.isFinite(accountId)) {
+      await loadMembers(accountId)
+    }
   } catch (err: any) {
     showErrorToast(err.response?.data?.error || '同步失败，请稍后再试')
   } finally {
     syncingAll.value = false
   }
 }
+
+watch(memberAccountId, (next) => {
+  const accountId = Number(next)
+  if (Number.isFinite(accountId)) {
+    loadMembers(accountId)
+  } else {
+    memberList.value = []
+  }
+})
+
+const filteredMembers = computed(() => {
+  const query = memberSearch.value.trim().toLowerCase()
+  if (!query) return memberList.value
+  return memberList.value.filter(member => {
+    const name = String(member.name || '').toLowerCase()
+    const email = String(member.email || '').toLowerCase()
+    return name.includes(query) || email.includes(query)
+  })
+})
 
 const loadInvites = async (accountId: number) => {
   loadingInvites.value = true
@@ -962,6 +1013,75 @@ const handleInviteSubmit = async () => {
         </div>
       </div>
     </div>
+
+    <!-- 成员列表（同步后缓存） -->
+    <Card class="border border-gray-100 shadow-sm">
+      <CardContent class="p-6 space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h3 class="text-lg font-semibold text-gray-900">成员列表</h3>
+            <p class="text-sm text-gray-500">显示最近同步后的成员数据（不自动同步）。</p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            class="rounded-lg text-xs h-8 border-gray-200"
+            :disabled="!memberAccountId || memberListLoading"
+            @click="() => {
+              const accountId = Number(memberAccountId)
+              if (Number.isFinite(accountId)) loadMembers(accountId)
+            }"
+          >
+            刷新列表
+          </Button>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-[220px_1fr]">
+          <div class="space-y-2">
+            <Label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">选择空间</Label>
+            <Select v-model="memberAccountId">
+              <SelectTrigger class="h-10">
+                <SelectValue placeholder="选择账号" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="account in accounts" :key="account.id" :value="String(account.id)">
+                  {{ account.email }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div class="space-y-2">
+            <Label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">搜索成员</Label>
+            <Input v-model="memberSearch" placeholder="搜索成员姓名或邮箱..." class="h-10" />
+          </div>
+        </div>
+
+        <div class="border border-gray-100 rounded-xl overflow-hidden">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-gray-500 text-xs uppercase">
+              <tr>
+                <th class="px-4 py-3 text-left font-medium">成员</th>
+                <th class="px-4 py-3 text-left font-medium">邮箱</th>
+                <th class="px-4 py-3 text-left font-medium">角色</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-50">
+              <tr v-if="memberListLoading">
+                <td colspan="3" class="px-4 py-6 text-center text-gray-400">正在加载成员...</td>
+              </tr>
+              <tr v-else-if="filteredMembers.length === 0">
+                <td colspan="3" class="px-4 py-6 text-center text-gray-400">暂无成员数据</td>
+              </tr>
+              <tr v-for="member in filteredMembers" :key="member.id">
+                <td class="px-4 py-3 text-gray-900">{{ member.name || '-' }}</td>
+                <td class="px-4 py-3 text-gray-600">{{ member.email || '-' }}</td>
+                <td class="px-4 py-3 text-gray-600 capitalize">{{ member.role || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
 
     <!-- Edit Dialog -->
     <Dialog v-model:open="showDialog">

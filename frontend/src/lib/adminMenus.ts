@@ -44,7 +44,6 @@ const ICONS_BY_MENU_KEY: Record<string, any> = {
   my_orders: ShoppingCart,
   points_exchange: Gift,
   accounts: Users,
-  member_list: Users,
   account_recovery: Recycle,
   stats: BarChart3,
   user_management: User,
@@ -66,7 +65,6 @@ const FALLBACK_ADMIN_MENU_TREE: AdminMenuDraftNode[] = [
   { key: 'stats', path: '/admin/stats', label: '数据统计' },
   { key: 'user_info', path: '/admin/user-info', label: '用户信息' },
   { key: 'accounts', path: '/admin/accounts', label: '账号管理' },
-  { key: 'member_list', path: '/admin/members', label: '成员列表' },
   { key: 'redemption_codes', path: '/admin/redemption-codes', label: '兑换码管理' },
   {
     key: 'order_management',

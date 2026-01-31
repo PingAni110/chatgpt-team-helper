@@ -14,6 +14,52 @@ const DEFAULT_PROXY_CACHE_TTL_MS = 60_000
 let defaultProxyCache = { loadedAt: 0, proxies: [] }
 let defaultProxyCursor = 0
 
+const formatExpireAt = (date) => {
+  const pad = (value) => String(value).padStart(2, '0')
+  try {
+    const parts = new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).formatToParts(date)
+    const get = (type) => parts.find(p => p.type === type)?.value || ''
+    return `${get('year')}/${get('month')}/${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`
+  } catch {
+    return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  }
+}
+
+const decodeJwtPayload = (token) => {
+  const raw = String(token || '').trim()
+  if (!raw) return null
+  const parts = raw.split('.')
+  if (parts.length < 2) return null
+  const payload = parts[1]
+  if (!payload) return null
+  try {
+    const padded = payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '=')
+    const decoded = Buffer.from(padded, 'base64').toString('utf8')
+    return JSON.parse(decoded)
+  } catch {
+    return null
+  }
+}
+
+const deriveExpireAtFromToken = (token) => {
+  const payload = decodeJwtPayload(token)
+  if (!payload || typeof payload !== 'object') return null
+  const exp = Number(payload.exp)
+  if (!Number.isFinite(exp) || exp <= 0) return null
+  const date = new Date(exp * 1000)
+  if (Number.isNaN(date.getTime())) return null
+  return formatExpireAt(date)
+}
+
 const getDefaultProxyList = () => {
   const now = Date.now()
   if (defaultProxyCache.loadedAt && (now - defaultProxyCache.loadedAt) < DEFAULT_PROXY_CACHE_TTL_MS) {
@@ -531,6 +577,60 @@ async function requestAccountUsers(account, params = {}, requestOptions = {}) {
   }
 }
 
+async function fetchAllAccountUsers(account, options = {}) {
+  const limit = Number.isFinite(Number(options.limit)) ? Math.max(1, Number(options.limit)) : 100
+  let offset = 0
+  let total = 0
+  const items = []
+  while (true) {
+    const page = await requestAccountUsers(
+      account,
+      { offset, limit, query: '' },
+      { proxy: options.proxy }
+    )
+    total = page.total
+    items.push(...(page.items || []))
+    offset += page.items.length
+    if (items.length >= total || page.items.length === 0) break
+  }
+  return {
+    total,
+    limit,
+    offset: Math.max(0, offset - limit),
+    items
+  }
+}
+
+const persistAccountMembers = (db, accountId, items = []) => {
+  if (!db || !accountId) return
+  db.run('DELETE FROM gpt_account_members WHERE account_id = ?', [accountId])
+  for (const item of items) {
+    const memberId = String(item?.id ?? '').trim()
+    if (!memberId) continue
+    db.run(
+      `
+        INSERT INTO gpt_account_members (
+          account_id,
+          member_id,
+          email,
+          name,
+          role,
+          created_time,
+          synced_at
+        ) VALUES (?, ?, ?, ?, ?, ?, DATETIME('now', 'localtime'))
+      `,
+      [
+        accountId,
+        memberId,
+        item.email || null,
+        item.name || null,
+        item.role || null,
+        item.created_time || null
+      ]
+    )
+  }
+}
+
 export async function fetchAccountUsersList(accountId, options = {}) {
   const db = await getDatabase()
   const account =
@@ -564,11 +664,22 @@ export async function syncAccountUserCount(accountId, options = {}) {
   }
 
   const usersData = await requestAccountUsers(account, { ...(options.userListParams || {}), query: '' }, { proxy: options.proxy })
+  const derivedExpireAt = deriveExpireAtFromToken(account.token)
+  const shouldUpdateExpireAt = Boolean(derivedExpireAt)
 
   db.run(
-    `UPDATE gpt_accounts SET user_count = ?, updated_at = DATETIME('now', 'localtime') WHERE id = ?`,
-    [usersData.total, account.id]
+    `
+      UPDATE gpt_accounts
+      SET user_count = ?,
+          expire_at = CASE WHEN ? = 1 THEN ? ELSE expire_at END,
+          updated_at = DATETIME('now', 'localtime')
+      WHERE id = ?
+    `,
+    [usersData.total, shouldUpdateExpireAt ? 1 : 0, derivedExpireAt, account.id]
   )
+
+  const fullUsersData = await fetchAllAccountUsers(account, { proxy: options.proxy })
+  persistAccountMembers(db, account.id, fullUsersData.items)
   await saveDatabase()
 
   const updatedAccount = await fetchAccountById(db, account.id)
@@ -576,7 +687,7 @@ export async function syncAccountUserCount(accountId, options = {}) {
   return {
     account: updatedAccount,
     syncedUserCount: usersData.total,
-    users: usersData
+    users: fullUsersData
   }
 }
 

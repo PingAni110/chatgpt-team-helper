@@ -11,6 +11,7 @@ const CONFIG_KEYS = [
   'purchase_anti_ban_product_name',
   'purchase_anti_ban_price',
   'purchase_anti_ban_service_days',
+  'purchase_products'
 ]
 
 const CACHE_TTL_MS = 60 * 1000
@@ -66,23 +67,38 @@ export const getPurchaseSettingsFromEnv = () => {
 
   return {
     expireMinutes,
-    plans: {
-      warranty: {
+    products: [
+      {
+        key: 'warranty',
         productName,
         amount,
-        serviceDays
+        serviceDays,
+        sortOrder: 1,
+        isActive: true,
+        isNoWarranty: false,
+        isAntiBan: false
       },
-      noWarranty: {
-        productName: noWarrantyProductName,
-        amount: noWarrantyAmount,
-        serviceDays: noWarrantyServiceDays
-      },
-      antiBan: {
+      {
+        key: 'anti_ban',
         productName: antiBanProductName,
         amount: antiBanAmount,
-        serviceDays: antiBanServiceDays
+        serviceDays: antiBanServiceDays,
+        sortOrder: 2,
+        isActive: true,
+        isNoWarranty: false,
+        isAntiBan: true
+      },
+      {
+        key: 'no_warranty',
+        productName: noWarrantyProductName,
+        amount: noWarrantyAmount,
+        serviceDays: noWarrantyServiceDays,
+        sortOrder: 3,
+        isActive: true,
+        isNoWarranty: true,
+        isAntiBan: false
       }
-    }
+    ]
   }
 }
 
@@ -108,44 +124,119 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
 
   const resolveTrimmedString = (key, fallback) => String(resolveString(key, fallback) ?? '').trim()
 
-  const productName = resolveTrimmedString('purchase_product_name', env.plans.warranty.productName)
-  const amount = normalizeMoney(resolveTrimmedString('purchase_price', env.plans.warranty.amount), env.plans.warranty.amount)
-  const serviceDays = Math.max(1, toInt(resolveTrimmedString('purchase_service_days', env.plans.warranty.serviceDays), env.plans.warranty.serviceDays))
+  const productName = resolveTrimmedString('purchase_product_name', env.products[0].productName)
+  const amount = normalizeMoney(resolveTrimmedString('purchase_price', env.products[0].amount), env.products[0].amount)
+  const serviceDays = Math.max(1, toInt(resolveTrimmedString('purchase_service_days', env.products[0].serviceDays), env.products[0].serviceDays))
   const expireMinutes = Math.max(5, toInt(resolveTrimmedString('purchase_order_expire_minutes', env.expireMinutes), env.expireMinutes))
 
-  const noWarrantyProductName = resolveTrimmedString('purchase_no_warranty_product_name', env.plans.noWarranty.productName)
-  const noWarrantyAmount = normalizeMoney(resolveTrimmedString('purchase_no_warranty_price', env.plans.noWarranty.amount), env.plans.noWarranty.amount)
+  const noWarrantyProductName = resolveTrimmedString('purchase_no_warranty_product_name', env.products[2].productName)
+  const noWarrantyAmount = normalizeMoney(resolveTrimmedString('purchase_no_warranty_price', env.products[2].amount), env.products[2].amount)
   const noWarrantyServiceDays = Math.max(
     1,
-    toInt(resolveTrimmedString('purchase_no_warranty_service_days', env.plans.noWarranty.serviceDays), env.plans.noWarranty.serviceDays)
+    toInt(resolveTrimmedString('purchase_no_warranty_service_days', env.products[2].serviceDays), env.products[2].serviceDays)
   )
 
-  const antiBanProductName = resolveTrimmedString('purchase_anti_ban_product_name', env.plans.antiBan.productName)
-  const antiBanAmount = normalizeMoney(resolveTrimmedString('purchase_anti_ban_price', env.plans.antiBan.amount), env.plans.antiBan.amount)
+  const antiBanProductName = resolveTrimmedString('purchase_anti_ban_product_name', env.products[1].productName)
+  const antiBanAmount = normalizeMoney(resolveTrimmedString('purchase_anti_ban_price', env.products[1].amount), env.products[1].amount)
   const antiBanServiceDays = Math.max(
     1,
-    toInt(resolveTrimmedString('purchase_anti_ban_service_days', env.plans.antiBan.serviceDays), env.plans.antiBan.serviceDays)
+    toInt(resolveTrimmedString('purchase_anti_ban_service_days', env.products[1].serviceDays), env.products[1].serviceDays)
   )
+
+  const storedProductsRaw = resolveTrimmedString('purchase_products', '')
+  let storedProducts = null
+  if (storedProductsRaw) {
+    try {
+      const parsed = JSON.parse(storedProductsRaw)
+      if (Array.isArray(parsed)) {
+        storedProducts = parsed
+      }
+    } catch {
+      storedProducts = null
+    }
+  }
+
+  const normalizeProduct = (input, fallback) => {
+    const rawKey = String(input?.key ?? fallback?.key ?? '').trim().toLowerCase()
+    const key = rawKey || String(fallback?.key || '').trim()
+    const fallbackName = String(fallback?.productName || '').trim()
+    const fallbackAmount = String(fallback?.amount || '').trim()
+    const fallbackDays = Number(fallback?.serviceDays || 1)
+    const productNameResolved = String(input?.productName ?? fallbackName).trim() || fallbackName
+    const amountResolved = normalizeMoney(input?.amount ?? fallbackAmount, fallbackAmount)
+    const serviceDaysResolved = Math.max(1, toInt(input?.serviceDays ?? fallbackDays, fallbackDays))
+    const sortOrderResolved = Number.isFinite(Number(input?.sortOrder)) ? Number(input.sortOrder) : (fallback?.sortOrder ?? 0)
+    const isActiveResolved = input?.isActive === false ? false : Boolean(input?.isActive ?? true)
+    const isNoWarrantyResolved = Boolean(input?.isNoWarranty ?? fallback?.isNoWarranty ?? false)
+    const isAntiBanResolved = Boolean(input?.isAntiBan ?? fallback?.isAntiBan ?? false)
+    const descriptionResolved = String(input?.description ?? fallback?.description ?? '').trim()
+    return {
+      key,
+      productName: productNameResolved,
+      amount: amountResolved,
+      serviceDays: serviceDaysResolved,
+      sortOrder: sortOrderResolved,
+      isActive: isActiveResolved,
+      isNoWarranty: isNoWarrantyResolved,
+      isAntiBan: isAntiBanResolved,
+      description: descriptionResolved
+    }
+  }
+
+  const fallbackProducts = [
+    {
+      key: 'warranty',
+      productName,
+      amount,
+      serviceDays,
+      sortOrder: 1,
+      isActive: true,
+      isNoWarranty: false,
+      isAntiBan: false,
+      description: ''
+    },
+    {
+      key: 'anti_ban',
+      productName: antiBanProductName,
+      amount: antiBanAmount,
+      serviceDays: antiBanServiceDays,
+      sortOrder: 2,
+      isActive: true,
+      isNoWarranty: false,
+      isAntiBan: true,
+      description: ''
+    },
+    {
+      key: 'no_warranty',
+      productName: noWarrantyProductName,
+      amount: noWarrantyAmount,
+      serviceDays: noWarrantyServiceDays,
+      sortOrder: 3,
+      isActive: true,
+      isNoWarranty: true,
+      isAntiBan: false,
+      description: ''
+    }
+  ]
+
+  const normalizedProducts = (storedProducts || fallbackProducts)
+    .map((item) => {
+      const fallback = fallbackProducts.find(product => product.key === String(item?.key ?? '').trim().toLowerCase()) || fallbackProducts[0]
+      return normalizeProduct(item, fallback)
+    })
+    .filter(item => item.key && item.productName)
+
+  const uniqueProducts = []
+  const seenKeys = new Set()
+  for (const product of normalizedProducts) {
+    if (seenKeys.has(product.key)) continue
+    seenKeys.add(product.key)
+    uniqueProducts.push(product)
+  }
 
   cachedSettings = {
     expireMinutes,
-    plans: {
-      warranty: {
-        productName,
-        amount,
-        serviceDays
-      },
-      noWarranty: {
-        productName: noWarrantyProductName,
-        amount: noWarrantyAmount,
-        serviceDays: noWarrantyServiceDays
-      },
-      antiBan: {
-        productName: antiBanProductName,
-        amount: antiBanAmount,
-        serviceDays: antiBanServiceDays
-      }
-    },
+    products: uniqueProducts.length ? uniqueProducts : fallbackProducts,
     stored: {
       productName: stored.has('purchase_product_name'),
       amount: stored.has('purchase_price'),
@@ -156,7 +247,8 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
       noWarrantyServiceDays: stored.has('purchase_no_warranty_service_days'),
       antiBanProductName: stored.has('purchase_anti_ban_product_name'),
       antiBanAmount: stored.has('purchase_anti_ban_price'),
-      antiBanServiceDays: stored.has('purchase_anti_ban_service_days')
+      antiBanServiceDays: stored.has('purchase_anti_ban_service_days'),
+      products: stored.has('purchase_products')
     }
   }
   cachedAt = now

@@ -295,6 +295,38 @@ router.post('/sync-all', async (req, res) => {
   }
 })
 
+// 获取账号已同步的成员列表
+router.get('/:id/members', async (req, res) => {
+  try {
+    const accountId = Number(req.params.id)
+    if (!Number.isFinite(accountId)) {
+      return res.status(400).json({ error: 'Invalid account id' })
+    }
+    const db = await getDatabase()
+    const result = db.exec(
+      `
+        SELECT member_id, email, name, role, created_time, synced_at
+        FROM gpt_account_members
+        WHERE account_id = ?
+        ORDER BY role ASC, name ASC, email ASC
+      `,
+      [accountId]
+    )
+    const items = (result[0]?.values || []).map(row => ({
+      id: row[0],
+      email: row[1],
+      name: row[2],
+      role: row[3],
+      created_time: row[4],
+      synced_at: row[5]
+    }))
+    res.json({ items, total: items.length })
+  } catch (error) {
+    console.error('Get account members error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 // Get a single GPT account
 router.get('/:id', async (req, res) => {
   try {

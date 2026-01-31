@@ -325,6 +325,11 @@ export interface ChatgptAccountInvitesResponse {
   offset: number
 }
 
+export interface ChatgptAccountMembersResponse {
+  items: ChatgptAccountUser[]
+  total: number
+}
+
 export interface SyncUserCountResponse {
   message: string
   account: GptAccount
@@ -370,7 +375,7 @@ export interface RefreshTokenResponse {
 }
 
 export type RedemptionChannel = 'common' | 'linux-do' | 'xhs' | 'xianyu' | 'artisan-flow'
-export type PurchaseOrderType = 'warranty' | 'no_warranty' | 'anti_ban'
+export type PurchaseOrderType = string
 
 export interface RedemptionCode {
   id: number
@@ -422,11 +427,15 @@ export interface PurchaseMeta {
 }
 
 export interface PurchasePlan {
-  key: PurchaseOrderType
+  key: string
   productName: string
   amount: string
   serviceDays: number
   availableCount: number
+  sortOrder?: number
+  isNoWarranty?: boolean
+  isAntiBan?: boolean
+  description?: string
   buyerRewardPoints?: number
   inviteRewardPoints?: number
 }
@@ -824,11 +833,17 @@ export interface AdminZpaySettingsResponse {
 export interface AdminPurchaseSettingsResponse {
   purchase: {
     expireMinutes: number
-    plans: {
-      warranty: PurchasePlan
-      noWarranty: PurchasePlan
-      antiBan: PurchasePlan
-    }
+    products: Array<{
+      key: string
+      productName: string
+      amount: string
+      serviceDays: number
+      sortOrder?: number
+      isActive?: boolean
+      isNoWarranty?: boolean
+      isAntiBan?: boolean
+      description?: string
+    }>
     stored?: {
       productName?: boolean
       amount?: boolean
@@ -840,6 +855,7 @@ export interface AdminPurchaseSettingsResponse {
       antiBanProductName?: boolean
       antiBanAmount?: boolean
       antiBanServiceDays?: boolean
+      products?: boolean
     }
   }
 }
@@ -1048,16 +1064,18 @@ export const adminService = {
   },
 
   async updatePurchaseSettings(payload: {
-    productName: string
-    amount: string
-    serviceDays: number
     expireMinutes: number
-    noWarrantyProductName: string
-    noWarrantyAmount: string
-    noWarrantyServiceDays: number
-    antiBanProductName: string
-    antiBanAmount: string
-    antiBanServiceDays: number
+    products: Array<{
+      key: string
+      productName: string
+      amount: string
+      serviceDays: number
+      sortOrder?: number
+      isActive?: boolean
+      isNoWarranty?: boolean
+      isAntiBan?: boolean
+      description?: string
+    }>
   }): Promise<AdminPurchaseSettingsResponse> {
     const response = await api.put('/admin/purchase-settings', {
       purchase: payload
@@ -1429,6 +1447,11 @@ export const gptAccountService = {
 
   async getInvites(accountId: number, params?: { offset?: number; limit?: number; query?: string }): Promise<ChatgptAccountInvitesResponse> {
     const response = await api.get(`/gpt-accounts/${accountId}/invites`, { params })
+    return response.data
+  },
+
+  async getMembers(accountId: number): Promise<ChatgptAccountMembersResponse> {
+    const response = await api.get(`/gpt-accounts/${accountId}/members`)
     return response.data
   }
 }

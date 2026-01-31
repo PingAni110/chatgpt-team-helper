@@ -60,6 +60,41 @@ const getTableColumns = (database, tableName) => {
   }
 }
 
+const ensureAccountMembersTable = (database) => {
+  let changed = false
+  if (!database) return false
+  const exists = tableExists(database, 'gpt_account_members')
+  database.run(`
+    CREATE TABLE IF NOT EXISTS gpt_account_members (
+      account_id INTEGER NOT NULL,
+      member_id TEXT NOT NULL,
+      email TEXT,
+      name TEXT,
+      role TEXT,
+      created_time TEXT,
+      synced_at DATETIME DEFAULT (DATETIME('now', 'localtime')),
+      PRIMARY KEY (account_id, member_id)
+    )
+  `)
+  if (!exists) changed = true
+
+  const indexExists = (indexName) => {
+    if (!indexName) return false
+    const result = database.exec(
+      'SELECT name FROM sqlite_master WHERE type = "index" AND name = ? LIMIT 1',
+      [String(indexName)]
+    )
+    return Boolean(result[0]?.values?.length)
+  }
+
+  if (!indexExists('idx_gpt_account_members_account')) {
+    database.run('CREATE INDEX idx_gpt_account_members_account ON gpt_account_members(account_id)')
+    changed = true
+  }
+
+  return changed
+}
+
 const ensureRbacTables = (database) => {
   let changed = false
 
@@ -220,6 +255,10 @@ const ensureRbacTables = (database) => {
       changed = true
     }
 
+    if (ensureAccountMembersTable(database)) {
+      changed = true
+    }
+
     const ensureRole = (roleKey, roleName, description = '') => {
       if (!roleKey) return null
       const existing = database.exec('SELECT id FROM roles WHERE role_key = ? LIMIT 1', [roleKey])
@@ -284,8 +323,7 @@ const ensureRbacTables = (database) => {
       { key: 'stats', label: '数据统计', path: '/admin/stats', sortOrder: 1 },
       { key: 'user_info', label: '用户信息', path: '/admin/user-info', sortOrder: 2 },
       { key: 'accounts', label: '账号管理', path: '/admin/accounts', sortOrder: 3 },
-      { key: 'member_list', label: '成员列表', path: '/admin/members', sortOrder: 4 },
-      { key: 'redemption_codes', label: '兑换码管理', path: '/admin/redemption-codes', sortOrder: 5 },
+      { key: 'redemption_codes', label: '兑换码管理', path: '/admin/redemption-codes', sortOrder: 4 },
       { key: 'order_management', label: '订单管理', path: '', sortOrder: 6 },
       { key: 'product_management', label: '商品管理', path: '/admin/products', parentKey: 'order_management', sortOrder: 1 },
       { key: 'purchase_orders', label: '支付订单', path: '/admin/purchase-orders', parentKey: 'order_management', sortOrder: 2 },
@@ -1715,6 +1753,8 @@ export async function initDatabase() {
 	      updated_at DATETIME DEFAULT (DATETIME('now', 'localtime'))
 	    )
 	  `)
+
+  ensureAccountMembersTable(database)
 
   // Create redemption_codes table to manage redemption codes
   database.run(`

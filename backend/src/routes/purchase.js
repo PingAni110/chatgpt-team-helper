@@ -132,51 +132,51 @@ const generateOrderNo = () => {
 const ORDER_TYPE_WARRANTY = 'warranty'
 const ORDER_TYPE_NO_WARRANTY = 'no_warranty'
 const ORDER_TYPE_ANTI_BAN = 'anti_ban'
-const ORDER_TYPE_SET = new Set([ORDER_TYPE_WARRANTY, ORDER_TYPE_NO_WARRANTY, ORDER_TYPE_ANTI_BAN])
 const NO_WARRANTY_REWARD_POINTS = 1
 
-const normalizeOrderType = (value) => {
+const normalizeOrderType = (value, products = []) => {
   const normalized = String(value || '').trim().toLowerCase()
-  return ORDER_TYPE_SET.has(normalized) ? normalized : ORDER_TYPE_WARRANTY
+  if (!normalized) return ''
+  const productKeys = new Set((products || []).map(item => String(item?.key || '').trim().toLowerCase()).filter(Boolean))
+  if (!productKeys.size) return normalized
+  return productKeys.has(normalized) ? normalized : ''
 }
 
 const getPurchasePlans = async (db) => {
   const settings = await getPurchaseSettings(db)
+  const products = (settings.products || []).map(product => ({
+    key: String(product.key || '').trim(),
+    productName: String(product.productName || '').trim(),
+    amount: formatMoney(product.amount) || '0.00',
+    serviceDays: Math.max(1, Number(product.serviceDays) || 1),
+    sortOrder: Number.isFinite(Number(product.sortOrder)) ? Number(product.sortOrder) : 0,
+    isActive: product.isActive !== false,
+    isNoWarranty: Boolean(product.isNoWarranty),
+    isAntiBan: Boolean(product.isAntiBan),
+    description: String(product.description || '').trim()
+  }))
+
   return {
     expireMinutes: settings.expireMinutes,
-    plans: {
-      warranty: {
-        key: ORDER_TYPE_WARRANTY,
-        productName: settings.plans.warranty.productName,
-        amount: formatMoney(settings.plans.warranty.amount) || '1.00',
-        serviceDays: settings.plans.warranty.serviceDays
-      },
-      noWarranty: {
-        key: ORDER_TYPE_NO_WARRANTY,
-        productName: settings.plans.noWarranty.productName,
-        amount: formatMoney(settings.plans.noWarranty.amount) || '5.00',
-        serviceDays: settings.plans.noWarranty.serviceDays
-      },
-      antiBan: {
-        key: ORDER_TYPE_ANTI_BAN,
-        productName: settings.plans.antiBan.productName,
-        amount: formatMoney(settings.plans.antiBan.amount) || '10.00',
-        serviceDays: settings.plans.antiBan.serviceDays
-      }
-    }
+    products
   }
 }
 
-const getPurchasePlan = async (orderType, db) => {
-  const normalized = normalizeOrderType(orderType)
-  const { plans } = await getPurchasePlans(db)
-  if (normalized === ORDER_TYPE_NO_WARRANTY) return plans.noWarranty
-  if (normalized === ORDER_TYPE_ANTI_BAN) return plans.antiBan
-  return plans.warranty
+const getPurchasePlan = (orderType, products) => {
+  const normalized = normalizeOrderType(orderType, products)
+  return products.find(plan => plan.key === normalized) || null
 }
 
-const isNoWarrantyOrderType = (orderType) => normalizeOrderType(orderType) === ORDER_TYPE_NO_WARRANTY
-const isAntiBanOrderType = (orderType) => normalizeOrderType(orderType) === ORDER_TYPE_ANTI_BAN
+const isNoWarrantyOrderType = (orderType, products) => {
+  const plan = getPurchasePlan(orderType, products || [])
+  if (plan) return Boolean(plan.isNoWarranty)
+  return normalizeOrderType(orderType, []) === ORDER_TYPE_NO_WARRANTY
+}
+const isAntiBanOrderType = (orderType, products) => {
+  const plan = getPurchasePlan(orderType, products || [])
+  if (plan) return Boolean(plan.isAntiBan)
+  return normalizeOrderType(orderType, []) === ORDER_TYPE_ANTI_BAN
+}
 
 const getInviteOrderRewardPoints = () => Math.max(0, toInt(process.env.INVITE_ORDER_REWARD_POINTS, 5))
 const getPurchaseOrderRewardPoints = () => Math.max(0, toInt(process.env.PURCHASE_ORDER_REWARD_POINTS, 3))
@@ -1074,7 +1074,7 @@ const reserveDemotedCode = (db, { orderNo, email }) => {
 router.get('/meta', async (req, res) => {
   try {
     const db = await getDatabase()
-    const { plans, expireMinutes } = await getPurchasePlans(db)
+    const { products, expireMinutes } = await getPurchasePlans(db)
     await withLocks(['purchase'], async () => {
       const released = cleanupExpiredOrders(db, { expireMinutes })
       if (released) {
@@ -1083,40 +1083,31 @@ router.get('/meta', async (req, res) => {
     })
     const availableCount = getTodayAvailableCodeCount(db)
     const antiBanAvailableCount = getDemotedAvailableCodeCount(db)
-    const responsePlans = [
-      {
-        key: ORDER_TYPE_WARRANTY,
-        productName: plans.warranty.productName,
-        amount: plans.warranty.amount,
-        serviceDays: plans.warranty.serviceDays,
-        availableCount,
-        buyerRewardPoints: getPurchaseOrderRewardPoints(),
-        inviteRewardPoints: getInviteOrderRewardPoints()
-      },
-      {
-        key: ORDER_TYPE_NO_WARRANTY,
-        productName: plans.noWarranty.productName,
-        amount: plans.noWarranty.amount,
-        serviceDays: plans.noWarranty.serviceDays,
-        availableCount,
-        buyerRewardPoints: NO_WARRANTY_REWARD_POINTS,
-        inviteRewardPoints: NO_WARRANTY_REWARD_POINTS
-      },
-      {
-        key: ORDER_TYPE_ANTI_BAN,
-        productName: plans.antiBan.productName,
-        amount: plans.antiBan.amount,
-        serviceDays: plans.antiBan.serviceDays,
-        availableCount: antiBanAvailableCount,
-        buyerRewardPoints: getPurchaseOrderRewardPoints(),
-        inviteRewardPoints: getInviteOrderRewardPoints()
-      }
-    ]
+    const responsePlans = (products || [])
+      .filter(plan => plan.isActive !== false)
+      .map(plan => {
+        const isAntiBan = Boolean(plan.isAntiBan)
+        const isNoWarranty = Boolean(plan.isNoWarranty)
+        return {
+          key: plan.key,
+          productName: plan.productName,
+          amount: plan.amount,
+          serviceDays: plan.serviceDays,
+          sortOrder: plan.sortOrder,
+          isNoWarranty,
+          isAntiBan,
+          description: plan.description || '',
+          availableCount: isAntiBan ? antiBanAvailableCount : availableCount,
+          buyerRewardPoints: isNoWarranty ? NO_WARRANTY_REWARD_POINTS : getPurchaseOrderRewardPoints(),
+          inviteRewardPoints: isNoWarranty ? NO_WARRANTY_REWARD_POINTS : getInviteOrderRewardPoints()
+        }
+      })
+    const fallbackPlan = responsePlans[0]
     res.json({
       plans: responsePlans,
-      productName: plans.warranty.productName,
-      amount: plans.warranty.amount,
-      serviceDays: plans.warranty.serviceDays,
+      productName: fallbackPlan?.productName || '',
+      amount: fallbackPlan?.amount || '0.00',
+      serviceDays: fallbackPlan?.serviceDays || 0,
       availableCount
     })
   } catch (error) {
@@ -1128,7 +1119,6 @@ router.get('/meta', async (req, res) => {
 router.post('/orders', async (req, res) => {
   const email = normalizeEmail(req.body?.email)
   const payType = String(req.body?.type || req.body?.payType || '').trim()
-  const orderType = normalizeOrderType(req.body?.orderType || req.body?.order_type)
   const userIdFromToken = getUserIdFromAuthorization(req)
 
   if (!email) return res.status(400).json({ error: '请输入邮箱地址' })
@@ -1141,17 +1131,24 @@ router.post('/orders', async (req, res) => {
     return res.status(500).json({ error: '支付未配置，请联系管理员' })
   }
 
-  const orderNo = generateOrderNo()
-
   try {
     const db = await getDatabase()
     const purchasePlans = await getPurchasePlans(db)
-    const purchasePlan = await getPurchasePlan(orderType, db)
+    const products = purchasePlans.products || []
+    const resolvedOrderType = normalizeOrderType(req.body?.orderType || req.body?.order_type, products)
+    const purchasePlan = getPurchasePlan(resolvedOrderType, products)
+    if (!purchasePlan || !purchasePlan.key) {
+      return res.status(400).json({ error: '商品类型不可用，请刷新后再试' })
+    }
+    if (purchasePlan.isActive === false) {
+      return res.status(400).json({ error: '该商品已下架，请选择其他商品' })
+    }
+    const orderNo = generateOrderNo()
 
     const reservation = await withLocks(['purchase'], async () => {
       cleanupExpiredOrders(db, { expireMinutes: purchasePlans.expireMinutes })
 
-      const antiBan = isAntiBanOrderType(orderType)
+      const antiBan = isAntiBanOrderType(purchasePlan.key, products)
       const availableCount = antiBan ? getDemotedAvailableCodeCount(db) : getTodayAvailableCodeCount(db)
       if (availableCount <= 0) {
         return { ok: false, error: '今日库存不足，请稍后再试' }
@@ -1178,7 +1175,7 @@ router.post('/orders', async (req, res) => {
           purchasePlan.productName,
           purchasePlan.amount,
           purchasePlan.serviceDays,
-          orderType,
+          purchasePlan.key,
           payType,
           reserved.codeId,
           reserved.code,

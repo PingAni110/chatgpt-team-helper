@@ -13,16 +13,18 @@ const error = ref('')
 const { success: showSuccessToast, error: showErrorToast } = useToast()
 
 const formData = ref({
-  productName: '',
-  amount: '',
-  serviceDays: 30,
   expireMinutes: 15,
-  noWarrantyProductName: '',
-  noWarrantyAmount: '',
-  noWarrantyServiceDays: 30,
-  antiBanProductName: '',
-  antiBanAmount: '',
-  antiBanServiceDays: 30
+  products: [] as Array<{
+    key: string
+    productName: string
+    amount: string
+    serviceDays: number
+    sortOrder?: number
+    isActive?: boolean
+    isNoWarranty?: boolean
+    isAntiBan?: boolean
+    description?: string
+  }>
 })
 
 const loadSettings = async () => {
@@ -30,18 +32,20 @@ const loadSettings = async () => {
   error.value = ''
   try {
     const response = await adminService.getPurchaseSettings()
-    const plans = response.purchase.plans
+    const products = response.purchase.products || []
     formData.value = {
-      productName: plans.warranty.productName,
-      amount: plans.warranty.amount,
-      serviceDays: plans.warranty.serviceDays,
       expireMinutes: response.purchase.expireMinutes,
-      noWarrantyProductName: plans.noWarranty.productName,
-      noWarrantyAmount: plans.noWarranty.amount,
-      noWarrantyServiceDays: plans.noWarranty.serviceDays,
-      antiBanProductName: plans.antiBan.productName,
-      antiBanAmount: plans.antiBan.amount,
-      antiBanServiceDays: plans.antiBan.serviceDays
+      products: products.map(item => ({
+        key: item.key,
+        productName: item.productName,
+        amount: item.amount,
+        serviceDays: item.serviceDays,
+        sortOrder: item.sortOrder ?? 0,
+        isActive: item.isActive !== false,
+        isNoWarranty: Boolean(item.isNoWarranty),
+        isAntiBan: Boolean(item.isAntiBan),
+        description: item.description || ''
+      }))
     }
   } catch (err: any) {
     error.value = err.response?.data?.error || '加载商品配置失败'
@@ -55,7 +59,8 @@ const handleSave = async () => {
   error.value = ''
   try {
     await adminService.updatePurchaseSettings({
-      ...formData.value
+      expireMinutes: formData.value.expireMinutes,
+      products: formData.value.products
     })
     showSuccessToast('商品配置已更新')
     await loadSettings()
@@ -71,6 +76,24 @@ const handleSave = async () => {
 onMounted(() => {
   loadSettings()
 })
+
+const addProduct = () => {
+  formData.value.products.push({
+    key: '',
+    productName: '',
+    amount: '1.00',
+    serviceDays: 30,
+    sortOrder: formData.value.products.length + 1,
+    isActive: true,
+    isNoWarranty: false,
+    isAntiBan: false,
+    description: ''
+  })
+}
+
+const removeProduct = (index: number) => {
+  formData.value.products.splice(index, 1)
+}
 </script>
 
 <template>
@@ -91,18 +114,6 @@ onMounted(() => {
       <CardContent class="p-6 space-y-4">
         <div class="grid gap-4 md:grid-cols-2">
           <div class="space-y-2">
-            <Label>商品名称</Label>
-            <Input v-model="formData.productName" placeholder="通用渠道激活码" />
-          </div>
-          <div class="space-y-2">
-            <Label>价格（元）</Label>
-            <Input v-model="formData.amount" placeholder="1.00" />
-          </div>
-          <div class="space-y-2">
-            <Label>服务期（天）</Label>
-            <Input v-model.number="formData.serviceDays" type="number" min="1" />
-          </div>
-          <div class="space-y-2">
             <Label>订单过期时间（分钟）</Label>
             <Input v-model.number="formData.expireMinutes" type="number" min="5" />
           </div>
@@ -111,44 +122,60 @@ onMounted(() => {
     </Card>
 
     <Card class="border border-gray-100 shadow-sm">
-      <CardHeader class="border-b border-gray-100 bg-gray-50/60">
-        <CardTitle class="text-lg font-semibold text-gray-900">无质保商品</CardTitle>
+      <CardHeader class="border-b border-gray-100 bg-gray-50/60 flex flex-row items-center justify-between">
+        <CardTitle class="text-lg font-semibold text-gray-900">商品列表</CardTitle>
+        <Button size="sm" variant="outline" class="rounded-lg text-xs h-8 border-gray-200" @click="addProduct">
+          新增商品
+        </Button>
       </CardHeader>
-      <CardContent class="p-6 space-y-4">
-        <div class="grid gap-4 md:grid-cols-2">
-          <div class="space-y-2">
-            <Label>商品名称</Label>
-            <Input v-model="formData.noWarrantyProductName" placeholder="通用渠道激活码（无质保）" />
+      <CardContent class="p-6 space-y-6">
+        <div v-if="formData.products.length === 0" class="text-sm text-gray-500">暂无商品，请添加商品。</div>
+        <div v-for="(product, index) in formData.products" :key="index" class="border border-gray-100 rounded-2xl p-4 space-y-4">
+          <div class="flex items-center justify-between">
+            <h4 class="text-sm font-semibold text-gray-900">商品 #{{ index + 1 }}</h4>
+            <Button size="sm" variant="ghost" class="text-red-500 hover:text-red-600" @click="removeProduct(index)">
+              删除
+            </Button>
           </div>
-          <div class="space-y-2">
-            <Label>价格（元）</Label>
-            <Input v-model="formData.noWarrantyAmount" placeholder="5.00" />
+          <div class="grid gap-4 md:grid-cols-2">
+            <div class="space-y-2">
+              <Label>商品标识（key）</Label>
+              <Input v-model="product.key" placeholder="warranty" />
+            </div>
+            <div class="space-y-2">
+              <Label>商品名称</Label>
+              <Input v-model="product.productName" placeholder="通用渠道激活码" />
+            </div>
+            <div class="space-y-2">
+              <Label>价格（元）</Label>
+              <Input v-model="product.amount" placeholder="1.00" />
+            </div>
+            <div class="space-y-2">
+              <Label>服务期（天）</Label>
+              <Input v-model.number="product.serviceDays" type="number" min="1" />
+            </div>
+            <div class="space-y-2">
+              <Label>排序</Label>
+              <Input v-model.number="product.sortOrder" type="number" min="0" />
+            </div>
+            <div class="space-y-2">
+              <Label>描述</Label>
+              <Input v-model="product.description" placeholder="可选描述" />
+            </div>
           </div>
-          <div class="space-y-2">
-            <Label>服务期（天）</Label>
-            <Input v-model.number="formData.noWarrantyServiceDays" type="number" min="1" />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-
-    <Card class="border border-gray-100 shadow-sm">
-      <CardHeader class="border-b border-gray-100 bg-gray-50/60">
-        <CardTitle class="text-lg font-semibold text-gray-900">防封禁商品</CardTitle>
-      </CardHeader>
-      <CardContent class="p-6 space-y-4">
-        <div class="grid gap-4 md:grid-cols-2">
-          <div class="space-y-2">
-            <Label>商品名称</Label>
-            <Input v-model="formData.antiBanProductName" placeholder="通用渠道激活码(防封禁)" />
-          </div>
-          <div class="space-y-2">
-            <Label>价格（元）</Label>
-            <Input v-model="formData.antiBanAmount" placeholder="10.00" />
-          </div>
-          <div class="space-y-2">
-            <Label>服务期（天）</Label>
-            <Input v-model.number="formData.antiBanServiceDays" type="number" min="1" />
+          <div class="grid gap-4 md:grid-cols-3">
+            <label class="flex items-center gap-2 text-sm text-gray-600">
+              <input type="checkbox" v-model="product.isActive" class="h-4 w-4 rounded border-gray-300" />
+              上架
+            </label>
+            <label class="flex items-center gap-2 text-sm text-gray-600">
+              <input type="checkbox" v-model="product.isNoWarranty" class="h-4 w-4 rounded border-gray-300" />
+              无质保
+            </label>
+            <label class="flex items-center gap-2 text-sm text-gray-600">
+              <input type="checkbox" v-model="product.isAntiBan" class="h-4 w-4 rounded border-gray-300" />
+              防封禁
+            </label>
           </div>
         </div>
       </CardContent>

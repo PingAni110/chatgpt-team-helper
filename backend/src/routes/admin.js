@@ -698,7 +698,7 @@ router.get('/purchase-settings', async (req, res) => {
     res.json({
       purchase: {
         expireMinutes: settings.expireMinutes,
-        plans: settings.plans,
+        products: settings.products,
         stored: settings.stored
       }
     })
@@ -716,44 +716,66 @@ router.put('/purchase-settings', async (req, res) => {
     const current = await getPurchaseSettings(db, { forceRefresh: true })
     const env = getPurchaseSettingsFromEnv()
 
-    const productName = String(payload.productName ?? current.plans.warranty.productName ?? '').trim()
-    if (!productName) {
-      return res.status(400).json({ error: '商品名称不能为空' })
-    }
-    const amount = normalizeMoney(payload.amount ?? current.plans.warranty.amount, env.plans.warranty.amount)
-    const serviceDays = Math.max(1, toInt(payload.serviceDays ?? current.plans.warranty.serviceDays, env.plans.warranty.serviceDays))
     const expireMinutes = Math.max(5, toInt(payload.expireMinutes ?? current.expireMinutes, env.expireMinutes))
 
-    const noWarrantyProductName = String(payload.noWarrantyProductName ?? current.plans.noWarranty.productName ?? '').trim()
-    if (!noWarrantyProductName) {
-      return res.status(400).json({ error: '无质保商品名称不能为空' })
+    const inputProducts = Array.isArray(payload.products) ? payload.products : []
+    if (!inputProducts.length) {
+      return res.status(400).json({ error: '至少需要配置一个商品' })
     }
-    const noWarrantyAmount = normalizeMoney(payload.noWarrantyAmount ?? current.plans.noWarranty.amount, env.plans.noWarranty.amount)
-    const noWarrantyServiceDays = Math.max(
-      1,
-      toInt(payload.noWarrantyServiceDays ?? current.plans.noWarranty.serviceDays, env.plans.noWarranty.serviceDays)
-    )
 
-    const antiBanProductName = String(payload.antiBanProductName ?? current.plans.antiBan.productName ?? '').trim()
-    if (!antiBanProductName) {
-      return res.status(400).json({ error: '防封禁商品名称不能为空' })
+    const normalizedProducts = inputProducts.map((product) => {
+      const key = String(product?.key ?? '').trim().toLowerCase()
+      const productName = String(product?.productName ?? '').trim()
+      if (!key) throw new Error('商品标识不能为空')
+      if (!productName) throw new Error('商品名称不能为空')
+      const amount = normalizeMoney(product?.amount ?? '', '0.00')
+      if (!amount || amount === '0.00') {
+        throw new Error(`商品 ${key} 价格格式不正确`)
+      }
+      const serviceDays = Math.max(1, toInt(product?.serviceDays ?? 1, 1))
+      const sortOrder = Number.isFinite(Number(product?.sortOrder)) ? Number(product.sortOrder) : 0
+      return {
+        key,
+        productName,
+        amount,
+        serviceDays,
+        sortOrder,
+        isActive: product?.isActive !== false,
+        isNoWarranty: Boolean(product?.isNoWarranty),
+        isAntiBan: Boolean(product?.isAntiBan),
+        description: String(product?.description ?? '').trim()
+      }
+    })
+
+    const uniqueProducts = []
+    const seenKeys = new Set()
+    for (const product of normalizedProducts) {
+      if (seenKeys.has(product.key)) continue
+      seenKeys.add(product.key)
+      uniqueProducts.push(product)
     }
-    const antiBanAmount = normalizeMoney(payload.antiBanAmount ?? current.plans.antiBan.amount, env.plans.antiBan.amount)
-    const antiBanServiceDays = Math.max(
-      1,
-      toInt(payload.antiBanServiceDays ?? current.plans.antiBan.serviceDays, env.plans.antiBan.serviceDays)
-    )
 
-    upsertSystemConfigValue(db, 'purchase_product_name', productName)
-    upsertSystemConfigValue(db, 'purchase_price', amount)
-    upsertSystemConfigValue(db, 'purchase_service_days', serviceDays)
+    upsertSystemConfigValue(db, 'purchase_products', JSON.stringify(uniqueProducts))
     upsertSystemConfigValue(db, 'purchase_order_expire_minutes', expireMinutes)
-    upsertSystemConfigValue(db, 'purchase_no_warranty_product_name', noWarrantyProductName)
-    upsertSystemConfigValue(db, 'purchase_no_warranty_price', noWarrantyAmount)
-    upsertSystemConfigValue(db, 'purchase_no_warranty_service_days', noWarrantyServiceDays)
-    upsertSystemConfigValue(db, 'purchase_anti_ban_product_name', antiBanProductName)
-    upsertSystemConfigValue(db, 'purchase_anti_ban_price', antiBanAmount)
-    upsertSystemConfigValue(db, 'purchase_anti_ban_service_days', antiBanServiceDays)
+
+    const warrantyProduct = uniqueProducts.find(item => item.key === 'warranty')
+    const noWarrantyProduct = uniqueProducts.find(item => item.key === 'no_warranty')
+    const antiBanProduct = uniqueProducts.find(item => item.key === 'anti_ban')
+    if (warrantyProduct) {
+      upsertSystemConfigValue(db, 'purchase_product_name', warrantyProduct.productName)
+      upsertSystemConfigValue(db, 'purchase_price', warrantyProduct.amount)
+      upsertSystemConfigValue(db, 'purchase_service_days', warrantyProduct.serviceDays)
+    }
+    if (noWarrantyProduct) {
+      upsertSystemConfigValue(db, 'purchase_no_warranty_product_name', noWarrantyProduct.productName)
+      upsertSystemConfigValue(db, 'purchase_no_warranty_price', noWarrantyProduct.amount)
+      upsertSystemConfigValue(db, 'purchase_no_warranty_service_days', noWarrantyProduct.serviceDays)
+    }
+    if (antiBanProduct) {
+      upsertSystemConfigValue(db, 'purchase_anti_ban_product_name', antiBanProduct.productName)
+      upsertSystemConfigValue(db, 'purchase_anti_ban_price', antiBanProduct.amount)
+      upsertSystemConfigValue(db, 'purchase_anti_ban_service_days', antiBanProduct.serviceDays)
+    }
 
     saveDatabase()
     invalidatePurchaseSettingsCache()
@@ -762,12 +784,15 @@ router.put('/purchase-settings', async (req, res) => {
     res.json({
       purchase: {
         expireMinutes: updated.expireMinutes,
-        plans: updated.plans,
+        products: updated.products,
         stored: updated.stored
       }
     })
   } catch (error) {
     console.error('Update purchase-settings error:', error)
+    if (error instanceof Error && error.message) {
+      return res.status(400).json({ error: error.message })
+    }
     res.status(500).json({ error: 'Internal server error' })
   }
 })

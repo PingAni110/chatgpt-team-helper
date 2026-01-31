@@ -17,7 +17,6 @@ import AccountsView from '../views/AccountsView.vue'
 import UserManagementView from '../views/UserManagementView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import RedemptionCodesView from '../views/RedemptionCodesView.vue'
-import MemberListView from '../views/MemberListView.vue'
 import ProductManagementView from '../views/ProductManagementView.vue'
 import AppleShowcase from '../views/AppleShowcase.vue'
 import WaitingRoomAdminView from '../views/WaitingRoomAdminView.vue'
@@ -163,12 +162,6 @@ const router = createRouter({
           name: 'accounts',
           component: AccountsView,
           meta: { requiredMenuKey: 'accounts' },
-        },
-        {
-          path: 'members',
-          name: 'member-list',
-          component: MemberListView,
-          meta: { requiredMenuKey: 'member_list' },
         },
         {
           path: 'account-recovery',

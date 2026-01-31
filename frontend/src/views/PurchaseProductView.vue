@@ -132,10 +132,7 @@ const isCheckoutOpen = ref(false)
 const normalizeOrderType = (value: unknown): PurchaseOrderType | null => {
   const raw = Array.isArray(value) ? value[0] : value
   const normalized = String(raw ?? '').trim().toLowerCase()
-  if (normalized === 'warranty') return 'warranty'
-  if (normalized === 'no_warranty' || normalized === 'no-warranty' || normalized === 'nowarranty') return 'no_warranty'
-  if (normalized === 'anti_ban' || normalized === 'anti-ban' || normalized === 'antiban') return 'anti_ban'
-  return null
+  return normalized || null
 }
 
 const planKey = computed<PurchaseOrderType | null>(() => normalizeOrderType(route.params.productKey))
@@ -151,10 +148,9 @@ const availableCount = computed(() => plan.value?.availableCount ?? meta.value?.
 const isSoldOut = computed(() => Number(availableCount.value || 0) <= 0)
 
 const tagline = computed(() => {
-  if (planKey.value === 'no_warranty') return '无质保商品，请确认购买说明后再下单。'
-  if (planKey.value === 'warranty') return '支持质保服务，适合长期使用。'
-  if (planKey.value === 'anti_ban') return '防封禁方案（带质保），系统将自动使用专用通道完成开通。'
-  return '请选择商品后查看购买说明。'
+  if (plan.value?.isAntiBan) return '防封禁方案，系统将自动使用专用通道完成开通。'
+  if (plan.value?.isNoWarranty) return '无质保商品，请确认购买说明后再下单。'
+  return '支持质保服务，适合长期使用。'
 })
 
 interface NoteItem {
@@ -169,7 +165,7 @@ const notes = computed<NoteItem[]>(() => {
     { text: '如未收到邮件请检查垃圾箱，或使用"查询订单"页进行订单查询。' }
   ]
 
-  if (planKey.value === 'no_warranty') {
+  if (plan.value?.isNoWarranty) {
     return [
       { text: '无质保：不支持退款 / 补号。' },
       { text: '仅提供首次登陆咨询与基础使用指导。' },
@@ -177,7 +173,7 @@ const notes = computed<NoteItem[]>(() => {
     ]
   }
 
-  if (planKey.value === 'warranty') {
+  if (!plan.value?.isAntiBan) {
     return [
       { text: '质保：支持退款 / 补号（按平台规则处理）。' },
       { text: '遇到封号/异常可联系售后协助处理。' },
@@ -185,7 +181,7 @@ const notes = computed<NoteItem[]>(() => {
     ]
   }
 
-  if (planKey.value === 'anti_ban') {
+  if (plan.value?.isAntiBan) {
     return [
       { text: '经过特殊处理：开通后无法退出工作空间。', highlight: true },
       { text: '质保：支持退款 / 补号（按平台规则处理）。' },

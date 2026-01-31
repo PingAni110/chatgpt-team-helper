@@ -39,34 +39,21 @@
             <p class="text-[13px] font-semibold text-[#86868b] uppercase tracking-wider">订单类型</p>
             <div class="grid grid-cols-2 gap-3">
               <button
+                v-for="plan in plans"
+                :key="plan.key"
                 type="button"
                 class="rounded-2xl border backdrop-blur px-4 py-3 text-left text-[14px] font-medium transition"
-                :class="orderType === 'warranty'
+                :class="orderType === plan.key
                   ? 'border-blue-500/40 bg-blue-500/10 text-[#007AFF]'
                   : 'border-black/5 dark:border-white/10 bg-white/40 dark:bg-black/20 text-[#1d1d1f]/70 dark:text-white/70 hover:bg-white/60'"
                 :disabled="creating"
-                @click="orderType = 'warranty'"
+                @click="orderType = plan.key"
               >
                 <div class="flex items-center justify-between">
-                  <span>质保</span>
-                  <span class="tabular-nums">¥ {{ warrantyPlan?.amount ?? meta?.amount ?? '...' }}</span>
+                  <span>{{ plan.productName }}</span>
+                  <span class="tabular-nums">¥ {{ plan.amount ?? '...' }}</span>
                 </div>
-                <p class="mt-1 text-[12px] text-[#86868b]">支持退款 / 补号</p>
-              </button>
-              <button
-                type="button"
-                class="rounded-2xl border backdrop-blur px-4 py-3 text-left text-[14px] font-medium transition"
-                :class="orderType === 'no_warranty'
-                  ? 'border-blue-500/40 bg-blue-500/10 text-[#007AFF]'
-                  : 'border-black/5 dark:border-white/10 bg-white/40 dark:bg-black/20 text-[#1d1d1f]/70 dark:text-white/70 hover:bg-white/60'"
-                :disabled="creating"
-                @click="orderType = 'no_warranty'"
-              >
-                <div class="flex items-center justify-between">
-                  <span>无质保</span>
-                  <span class="tabular-nums">¥ {{ noWarrantyPlan?.amount ?? '5.00' }}</span>
-                </div>
-                <p class="mt-1 text-[12px] text-[#86868b]">仅提供首次登陆咨询</p>
+                <p class="mt-1 text-[12px] text-[#86868b]">{{ planHint(plan) }}</p>
               </button>
             </div>
           </div>
@@ -85,7 +72,7 @@
                 有效期：{{ currentPlan?.serviceDays ?? meta?.serviceDays ?? 30 }} 天（下单日起算）
               </p>
               <p>
-                购买奖励： +{{ currentPlan?.buyerRewardPoints ?? (orderType === 'no_warranty' ? 1 : '...') }} 积分
+                购买奖励： +{{ currentPlan?.buyerRewardPoints ?? '...' }} 积分
               </p>
             </div>
           </div>
@@ -233,7 +220,7 @@ const route = useRoute()
 const meta = ref<PurchaseMeta | null>(null)
 const email = ref('')
 const payType = ref<'alipay' | 'wxpay'>('alipay')
-const orderType = ref<PurchaseOrderType>('warranty')
+const orderType = ref<PurchaseOrderType>('')
 const creating = ref(false)
 const refreshing = ref(false)
 const errorMessage = ref('')
@@ -248,10 +235,7 @@ const { success: showSuccessToast, warning: showWarningToast } = useToast()
 const normalizeOrderTypeFromQuery = (value: unknown): PurchaseOrderType | null => {
   const raw = Array.isArray(value) ? value[0] : value
   const normalized = String(raw ?? '').trim().toLowerCase()
-  if (normalized === 'warranty') return 'warranty'
-  if (normalized === 'no_warranty' || normalized === 'no-warranty' || normalized === 'nowarranty') return 'no_warranty'
-  if (normalized === 'anti_ban' || normalized === 'anti-ban' || normalized === 'antiban') return 'anti_ban'
-  return null
+  return normalized || null
 }
 
 watch(
@@ -277,13 +261,12 @@ const currentPlan = computed<PurchasePlan | null>(() => {
   return plans.value.find(plan => plan.key === orderType.value) || firstPlan
 })
 
-const warrantyPlan = computed<PurchasePlan | null>(
-  () => plans.value.find(plan => plan.key === 'warranty') || null
-)
-
-const noWarrantyPlan = computed<PurchasePlan | null>(
-  () => plans.value.find(plan => plan.key === 'no_warranty') || null
-)
+const planHint = (plan: PurchasePlan | null) => {
+  if (!plan) return ''
+  if (plan.isAntiBan) return '防封禁通道'
+  if (plan.isNoWarranty) return '无质保方案'
+  return '标准方案'
+}
 
 const currentAvailableCount = computed(() => (
   currentPlan.value?.availableCount ?? meta.value?.availableCount ?? 0
@@ -321,11 +304,8 @@ const loadMeta = async () => {
   try {
     meta.value = await purchaseService.getMeta()
     if (meta.value?.plans?.length) {
-      const hasSelected = meta.value.plans.some(plan => plan.key === orderType.value)
-      if (!hasSelected) {
-        const firstPlan = meta.value.plans[0]
-        if (firstPlan) orderType.value = firstPlan.key
-      }
+      const hasSelected = orderType.value && meta.value.plans.some(plan => plan.key === orderType.value)
+      if (!hasSelected) orderType.value = meta.value.plans[0]?.key || ''
     }
   } catch (error: any) {
     errorMessage.value = error?.response?.data?.error || '加载库存失败，请稍后重试'
