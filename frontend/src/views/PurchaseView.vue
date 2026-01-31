@@ -181,11 +181,22 @@
           </div>
 
           <div class="pt-6 border-t border-gray-200/60 dark:border-white/10">
-            <h4 class="text-[13px] font-semibold text-[#86868b] uppercase tracking-wider mb-4">购买须知</h4>
-            <ul class="space-y-3 text-[14px] text-[#1d1d1f]/70 dark:text-white/70">
+            <div class="flex items-center justify-between mb-4">
+              <h4 class="text-[13px] font-semibold text-[#86868b] uppercase tracking-wider">购买须知</h4>
+              <label class="flex items-center gap-2 text-[12px] text-[#86868b]">
+                <input type="checkbox" v-model="showNotice" class="h-4 w-4 rounded border-gray-300" />
+                显示购前须知
+              </label>
+            </div>
+            <ul v-if="showNotice" class="space-y-3 text-[14px] text-[#1d1d1f]/70 dark:text-white/70">
               <li v-for="(item, idx) in purchaseNotices" :key="idx" class="flex items-start gap-3">
-                <span class="h-1.5 w-1.5 rounded-full bg-[#007AFF] mt-2 flex-shrink-0"></span>
-                <span>{{ item }}</span>
+                <span
+                  class="h-1.5 w-1.5 rounded-full mt-2 flex-shrink-0"
+                  :class="item.red ? 'bg-[#FF3B30]' : 'bg-[#007AFF]'"
+                ></span>
+                <span :class="[{ 'text-[#FF3B30] font-semibold': item.red, 'font-semibold': item.bold }]">
+                  {{ item.text }}
+                </span>
               </li>
             </ul>
           </div>
@@ -221,6 +232,7 @@ const orderDetail = ref<PurchaseOrderQueryResponse | null>(null)
 const orderEmail = ref('')
 const autoRefreshTimer = ref<number | null>(null)
 const orderFetchInFlight = ref(false)
+const showNotice = ref(false)
 
 const { success: showSuccessToast, warning: showWarningToast } = useToast()
 
@@ -270,13 +282,17 @@ const planHint = (plan: PurchasePlan | null) => {
 
 const purchaseNotices = computed(() => {
   const notices = (currentPlan.value?.notice || [])
-    .map(item => String(item || '').trim())
-    .filter(Boolean)
+    .map(item => ({
+      text: String(item?.text ?? '').trim(),
+      bold: Boolean(item?.bold),
+      red: Boolean(item?.red)
+    }))
+    .filter(item => item.text)
   if (notices.length) return notices
   return [
-    '订单信息将发送至填写的邮箱，请确认邮箱可正常收信。',
-    '支付成功后系统自动处理，无需手动兑换。',
-    '如未收到邮件请检查垃圾箱，或使用“查询订单”页进行订单查询。'
+    { text: '订单信息将发送至填写的邮箱，请确认邮箱可正常收信。' },
+    { text: '支付成功后系统自动处理，无需手动兑换。' },
+    { text: '如未收到邮件请检查垃圾箱，或使用“查询订单”页进行订单查询。' }
   ]
 })
 

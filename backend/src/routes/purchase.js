@@ -163,12 +163,21 @@ const getPurchasePlans = async (db) => {
 }
 
 const normalizePurchaseNotice = (value) => {
+  const normalizeItem = (item) => {
+    const text = String(item?.text ?? item ?? '').trim()
+    if (!text) return null
+    return {
+      text,
+      bold: Boolean(item?.bold),
+      red: Boolean(item?.red)
+    }
+  }
   if (Array.isArray(value)) {
-    return value.map(item => String(item || '').trim()).filter(Boolean)
+    return value.map(normalizeItem).filter(Boolean)
   }
   const raw = String(value || '').trim()
   if (!raw) return []
-  return raw.split(/\r?\n/).map(item => item.trim()).filter(Boolean)
+  return raw.split(/\r?\n/).map(line => normalizeItem({ text: line })).filter(Boolean)
 }
 
 const getPurchasePlan = (orderType, products) => {

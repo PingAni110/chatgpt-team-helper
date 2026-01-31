@@ -31,6 +31,39 @@ const normalizeMoney = (value, fallback) => {
   return parsed.toFixed(2)
 }
 
+const normalizeNoticeItems = (value, fallback = []) => {
+  const normalizeItem = (item) => {
+    const text = String(item?.text ?? item ?? '').trim()
+    if (!text) return null
+    return {
+      text,
+      bold: Boolean(item?.bold),
+      red: Boolean(item?.red)
+    }
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(normalizeItem).filter(Boolean)
+  }
+
+  const raw = String(value ?? '').trim()
+  if (!raw) return Array.isArray(fallback) ? fallback : []
+
+  try {
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) {
+      return parsed.map(normalizeItem).filter(Boolean)
+    }
+  } catch {
+    // ignore parse errors
+  }
+
+  return raw
+    .split(/\r?\n/)
+    .map(line => normalizeItem({ text: line }))
+    .filter(Boolean)
+}
+
 const loadSystemConfigMap = (database, keys) => {
   if (!database) return new Map()
   const list = Array.isArray(keys) && keys.length ? keys : CONFIG_KEYS
@@ -56,6 +89,7 @@ export const getPurchaseSettingsFromEnv = () => {
     process.env.PURCHASE_NOTICE ||
       '订单信息将发送至填写的邮箱，请确认邮箱可正常收信。\n支付成功后系统自动处理，无需手动兑换。\n如未收到邮件请检查垃圾箱，或使用"查询订单"页进行订单查询。'
   ).trim()
+  const noticeItems = normalizeNoticeItems(notice, [])
 
   const noWarrantyAmount = normalizeMoney(process.env.PURCHASE_NO_WARRANTY_PRICE ?? '5.00', '5.00')
   const noWarrantyServiceDays = Math.max(1, toInt(process.env.PURCHASE_NO_WARRANTY_SERVICE_DAYS, serviceDays))
@@ -80,7 +114,8 @@ export const getPurchaseSettingsFromEnv = () => {
         sortOrder: 1,
         isActive: true,
         isNoWarranty: false,
-        isAntiBan: false
+        isAntiBan: false,
+        notice: noticeItems
       },
       {
         key: 'anti_ban',
@@ -90,7 +125,8 @@ export const getPurchaseSettingsFromEnv = () => {
         sortOrder: 2,
         isActive: true,
         isNoWarranty: false,
-        isAntiBan: true
+        isAntiBan: true,
+        notice: noticeItems
       },
       {
         key: 'no_warranty',
@@ -100,7 +136,8 @@ export const getPurchaseSettingsFromEnv = () => {
         sortOrder: 3,
         isActive: true,
         isNoWarranty: true,
-        isAntiBan: false
+        isAntiBan: false,
+        notice: noticeItems
       }
     ]
   }
@@ -173,9 +210,7 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
     const isActiveResolved = input?.isActive === false ? false : Boolean(input?.isActive ?? true)
     const isNoWarrantyResolved = Boolean(input?.isNoWarranty ?? fallback?.isNoWarranty ?? false)
     const isAntiBanResolved = Boolean(input?.isAntiBan ?? fallback?.isAntiBan ?? false)
-    const noticeResolved = Array.isArray(input?.notice)
-      ? input.notice.map(item => String(item || '').trim()).filter(Boolean).join('\n')
-      : String(input?.notice ?? fallback?.notice ?? env.notice ?? '').trim()
+    const noticeResolved = normalizeNoticeItems(input?.notice, fallback?.notice ?? [])
     return {
       key,
       productName: productNameResolved,

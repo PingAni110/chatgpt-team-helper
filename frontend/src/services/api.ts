@@ -435,7 +435,11 @@ export interface PurchasePlan {
   sortOrder?: number
   isNoWarranty?: boolean
   isAntiBan?: boolean
-  notice?: string[]
+  notice?: Array<{
+    text: string
+    bold?: boolean
+    red?: boolean
+  }>
   buyerRewardPoints?: number
   inviteRewardPoints?: number
 }
@@ -842,7 +846,11 @@ export interface AdminPurchaseSettingsResponse {
       isActive?: boolean
       isNoWarranty?: boolean
       isAntiBan?: boolean
-      notice?: string
+      notice?: Array<{
+        text: string
+        bold?: boolean
+        red?: boolean
+      }>
     }>
     stored?: {
       productName?: boolean
@@ -1074,7 +1082,11 @@ export const adminService = {
       isActive?: boolean
       isNoWarranty?: boolean
       isAntiBan?: boolean
-      notice?: string
+      notice?: Array<{
+        text: string
+        bold?: boolean
+        red?: boolean
+      }>
     }>
   }): Promise<AdminPurchaseSettingsResponse> {
     const response = await api.put('/admin/purchase-settings', {

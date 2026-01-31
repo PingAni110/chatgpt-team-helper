@@ -89,9 +89,11 @@
               <li v-for="(item, idx) in notes" :key="idx" class="flex items-start gap-3">
                 <span
                   class="h-1.5 w-1.5 rounded-full mt-2 flex-shrink-0"
-                  :class="item.highlight ? 'bg-[#FF3B30]' : 'bg-[#007AFF]'"
+                  :class="item.red ? 'bg-[#FF3B30]' : 'bg-[#007AFF]'"
                 ></span>
-                <span :class="item.highlight ? 'text-[#FF3B30] font-medium' : ''">{{ item.text }}</span>
+                <span :class="[{ 'text-[#FF3B30] font-semibold': item.red, 'font-semibold': item.bold }]">
+                  {{ item.text }}
+                </span>
               </li>
             </ul>
           </div>
@@ -155,15 +157,20 @@ const tagline = computed(() => {
 
 interface NoteItem {
   text: string
-  highlight?: boolean
+  bold?: boolean
+  red?: boolean
 }
 
 const notes = computed<NoteItem[]>(() => {
   const noticeItems = (plan.value?.notice || [])
-    .map(item => String(item || '').trim())
-    .filter(Boolean)
+    .map(item => ({
+      text: String(item?.text ?? '').trim(),
+      bold: Boolean(item?.bold),
+      red: Boolean(item?.red)
+    }))
+    .filter(item => item.text)
   if (noticeItems.length) {
-    return noticeItems.map(text => ({ text }))
+    return noticeItems
   }
   return [
     { text: '订单信息将发送至填写的邮箱，请确认邮箱可正常收信。' },

@@ -23,7 +23,11 @@ const formData = ref({
     isActive?: boolean
     isNoWarranty?: boolean
     isAntiBan?: boolean
-    notice?: string
+    notice?: Array<{
+      text: string
+      bold?: boolean
+      red?: boolean
+    }>
   }>
 })
 
@@ -44,7 +48,7 @@ const loadSettings = async () => {
         isActive: item.isActive !== false,
         isNoWarranty: Boolean(item.isNoWarranty),
         isAntiBan: Boolean(item.isAntiBan),
-        notice: item.notice || ''
+        notice: Array.isArray(item.notice) ? item.notice : []
       }))
     }
   } catch (err: any) {
@@ -87,8 +91,18 @@ const addProduct = () => {
     isActive: true,
     isNoWarranty: false,
     isAntiBan: false,
-    notice: ''
+    notice: []
   })
+}
+
+const addNoticeItem = (product: typeof formData.value.products[number]) => {
+  if (!product.notice) product.notice = []
+  product.notice.push({ text: '', bold: false, red: false })
+}
+
+const removeNoticeItem = (product: typeof formData.value.products[number], index: number) => {
+  if (!product.notice) return
+  product.notice.splice(index, 1)
 }
 
 const removeProduct = (index: number) => {
@@ -158,14 +172,34 @@ const removeProduct = (index: number) => {
               <Label>排序</Label>
               <Input v-model.number="product.sortOrder" type="number" min="0" />
             </div>
-            <div class="space-y-2 md:col-span-2">
-              <Label>购买须知</Label>
-              <textarea
-                v-model="product.notice"
-                rows="3"
-                class="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                placeholder="每行一条购买须知"
-              ></textarea>
+            <div class="space-y-3 md:col-span-2">
+              <div class="flex items-center justify-between">
+                <Label>购买须知</Label>
+                <Button size="sm" variant="outline" class="h-7 rounded-lg text-xs border-gray-200" @click="addNoticeItem(product)">
+                  新增须知
+                </Button>
+              </div>
+              <div v-if="!product.notice || product.notice.length === 0" class="text-sm text-gray-400">
+                暂无购前须知，请添加。
+              </div>
+              <div v-for="(noticeItem, noticeIndex) in product.notice" :key="noticeIndex" class="rounded-xl border border-gray-100 p-3 space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                  <Input v-model="noticeItem.text" placeholder="输入须知内容" />
+                  <Button size="sm" variant="ghost" class="text-red-500 hover:text-red-600" @click="removeNoticeItem(product, noticeIndex)">
+                    删除
+                  </Button>
+                </div>
+                <div class="flex flex-wrap gap-6">
+                  <label class="flex items-center gap-2 text-sm text-gray-600">
+                    <input type="checkbox" v-model="noticeItem.bold" class="h-4 w-4 rounded border-gray-300" />
+                    加粗
+                  </label>
+                  <label class="flex items-center gap-2 text-sm text-gray-600">
+                    <input type="checkbox" v-model="noticeItem.red" class="h-4 w-4 rounded border-gray-300" />
+                    标红
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
           <div class="grid gap-4 md:grid-cols-3">

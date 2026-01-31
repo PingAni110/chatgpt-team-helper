@@ -733,9 +733,27 @@ router.put('/purchase-settings', async (req, res) => {
       }
       const serviceDays = Math.max(1, toInt(product?.serviceDays ?? 1, 1))
       const sortOrder = Number.isFinite(Number(product?.sortOrder)) ? Number(product.sortOrder) : 0
-      const notice = Array.isArray(product?.notice)
-        ? product.notice.map(item => String(item || '').trim()).filter(Boolean).join('\n')
-        : String(product?.notice ?? '').trim()
+      const normalizeNoticeItems = (value) => {
+        const normalizeItem = (item) => {
+          const text = String(item?.text ?? item ?? '').trim()
+          if (!text) return null
+          return {
+            text,
+            bold: Boolean(item?.bold),
+            red: Boolean(item?.red)
+          }
+        }
+        if (Array.isArray(value)) {
+          return value.map(normalizeItem).filter(Boolean)
+        }
+        const raw = String(value ?? '').trim()
+        if (!raw) return []
+        return raw
+          .split(/\r?\n/)
+          .map(line => normalizeItem({ text: line }))
+          .filter(Boolean)
+      }
+      const notice = normalizeNoticeItems(product?.notice)
       return {
         key,
         productName,
