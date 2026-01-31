@@ -437,6 +437,7 @@ export interface PurchasePlan {
   isNoWarranty?: boolean
   isAntiBan?: boolean
   description?: string
+  notice?: string[]
   buyerRewardPoints?: number
   inviteRewardPoints?: number
 }
@@ -845,6 +846,7 @@ export interface AdminPurchaseSettingsResponse {
       isNoWarranty?: boolean
       isAntiBan?: boolean
       description?: string
+      notice?: string
     }>
     stored?: {
       productName?: boolean
@@ -1079,6 +1081,7 @@ export const adminService = {
       isNoWarranty?: boolean
       isAntiBan?: boolean
       description?: string
+      notice?: string
     }>
   }): Promise<AdminPurchaseSettingsResponse> {
     const response = await api.put('/admin/purchase-settings', {

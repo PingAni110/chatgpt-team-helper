@@ -269,7 +269,10 @@ const planHint = (plan: PurchasePlan | null) => {
 }
 
 const purchaseNotices = computed(() => {
-  const notices = (meta.value?.notice || []).map(item => String(item || '').trim()).filter(Boolean)
+  const planNotices = currentPlan.value?.notice || []
+  const notices = (planNotices.length ? planNotices : meta.value?.notice || [])
+    .map(item => String(item || '').trim())
+    .filter(Boolean)
   if (notices.length) return notices
   return [
     '订单信息将发送至填写的邮箱，请确认邮箱可正常收信。',

@@ -25,6 +25,7 @@ const formData = ref({
     isNoWarranty?: boolean
     isAntiBan?: boolean
     description?: string
+    notice?: string
   }>
 })
 
@@ -46,7 +47,8 @@ const loadSettings = async () => {
         isActive: item.isActive !== false,
         isNoWarranty: Boolean(item.isNoWarranty),
         isAntiBan: Boolean(item.isAntiBan),
-        description: item.description || ''
+        description: item.description || '',
+        notice: item.notice || ''
       }))
     }
   } catch (err: any) {
@@ -90,7 +92,8 @@ const addProduct = () => {
     isActive: true,
     isNoWarranty: false,
     isAntiBan: false,
-    description: ''
+    description: '',
+    notice: ''
   })
 }
 
@@ -174,6 +177,15 @@ const removeProduct = (index: number) => {
             <div class="space-y-2">
               <Label>描述</Label>
               <Input v-model="product.description" placeholder="可选描述" />
+            </div>
+            <div class="space-y-2 md:col-span-2">
+              <Label>购买须知</Label>
+              <textarea
+                v-model="product.notice"
+                rows="3"
+                class="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                placeholder="每行一条购买须知"
+              ></textarea>
             </div>
           </div>
           <div class="grid gap-4 md:grid-cols-3">

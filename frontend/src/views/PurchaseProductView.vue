@@ -159,7 +159,9 @@ interface NoteItem {
 }
 
 const notes = computed<NoteItem[]>(() => {
-  const common = (meta.value?.notice || [])
+  const planNotice = plan.value?.notice || []
+  const noticeSource = planNotice.length ? planNotice : meta.value?.notice || []
+  const common = noticeSource
     .map(item => String(item || '').trim())
     .filter(Boolean)
     .map(text => ({ text }))

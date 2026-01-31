@@ -739,6 +739,9 @@ router.put('/purchase-settings', async (req, res) => {
       }
       const serviceDays = Math.max(1, toInt(product?.serviceDays ?? 1, 1))
       const sortOrder = Number.isFinite(Number(product?.sortOrder)) ? Number(product.sortOrder) : 0
+      const notice = Array.isArray(product?.notice)
+        ? product.notice.map(item => String(item || '').trim()).filter(Boolean).join('\n')
+        : String(product?.notice ?? '').trim()
       return {
         key,
         productName,
@@ -748,7 +751,8 @@ router.put('/purchase-settings', async (req, res) => {
         isActive: product?.isActive !== false,
         isNoWarranty: Boolean(product?.isNoWarranty),
         isAntiBan: Boolean(product?.isAntiBan),
-        description: String(product?.description ?? '').trim()
+        description: String(product?.description ?? '').trim(),
+        notice
       }
     })
 
