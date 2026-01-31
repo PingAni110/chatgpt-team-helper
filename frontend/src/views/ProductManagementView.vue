@@ -14,7 +14,6 @@ const { success: showSuccessToast, error: showErrorToast } = useToast()
 
 const formData = ref({
   expireMinutes: 15,
-  notice: '',
   products: [] as Array<{
     key: string
     productName: string
@@ -24,6 +23,7 @@ const formData = ref({
     isActive?: boolean
     isNoWarranty?: boolean
     isAntiBan?: boolean
+    notice?: string
   }>
 })
 
@@ -35,7 +35,6 @@ const loadSettings = async () => {
     const products = response.purchase.products || []
     formData.value = {
       expireMinutes: response.purchase.expireMinutes,
-      notice: response.purchase.notice || '',
       products: products.map(item => ({
         key: item.key,
         productName: item.productName,
@@ -44,7 +43,8 @@ const loadSettings = async () => {
         sortOrder: item.sortOrder ?? 0,
         isActive: item.isActive !== false,
         isNoWarranty: Boolean(item.isNoWarranty),
-        isAntiBan: Boolean(item.isAntiBan)
+        isAntiBan: Boolean(item.isAntiBan),
+        notice: item.notice || ''
       }))
     }
   } catch (err: any) {
@@ -60,7 +60,6 @@ const handleSave = async () => {
   try {
     await adminService.updatePurchaseSettings({
       expireMinutes: formData.value.expireMinutes,
-      notice: formData.value.notice,
       products: formData.value.products
     })
     showSuccessToast('商品配置已更新')
@@ -87,7 +86,8 @@ const addProduct = () => {
     sortOrder: formData.value.products.length + 1,
     isActive: true,
     isNoWarranty: false,
-    isAntiBan: false
+    isAntiBan: false,
+    notice: ''
   })
 }
 
@@ -117,16 +117,6 @@ const removeProduct = (index: number) => {
             <Label>订单过期时间（分钟）</Label>
             <Input v-model.number="formData.expireMinutes" type="number" min="5" />
           </div>
-        </div>
-        <div class="space-y-2">
-          <Label>购买须知</Label>
-          <textarea
-            v-model="formData.notice"
-            rows="4"
-            class="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-            placeholder="每行一条购买须知"
-          ></textarea>
-          <p class="text-xs text-gray-400">支持多行输入，前端会按行展示。</p>
         </div>
       </CardContent>
     </Card>
@@ -167,6 +157,15 @@ const removeProduct = (index: number) => {
             <div class="space-y-2">
               <Label>排序</Label>
               <Input v-model.number="product.sortOrder" type="number" min="0" />
+            </div>
+            <div class="space-y-2 md:col-span-2">
+              <Label>购买须知</Label>
+              <textarea
+                v-model="product.notice"
+                rows="3"
+                class="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                placeholder="每行一条购买须知"
+              ></textarea>
             </div>
           </div>
           <div class="grid gap-4 md:grid-cols-3">

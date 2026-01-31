@@ -698,7 +698,6 @@ router.get('/purchase-settings', async (req, res) => {
     res.json({
       purchase: {
         expireMinutes: settings.expireMinutes,
-        notice: settings.notice,
         products: settings.products,
         stored: settings.stored
       }
@@ -718,11 +717,6 @@ router.put('/purchase-settings', async (req, res) => {
     const env = getPurchaseSettingsFromEnv()
 
     const expireMinutes = Math.max(5, toInt(payload.expireMinutes ?? current.expireMinutes, env.expireMinutes))
-    const noticeInput = payload.notice
-    const notice = typeof noticeInput === 'string'
-      ? noticeInput.trim()
-      : String(current.notice ?? env.notice ?? '').trim()
-
     const inputProducts = Array.isArray(payload.products) ? payload.products : []
     if (!inputProducts.length) {
       return res.status(400).json({ error: '至少需要配置一个商品' })
@@ -739,6 +733,9 @@ router.put('/purchase-settings', async (req, res) => {
       }
       const serviceDays = Math.max(1, toInt(product?.serviceDays ?? 1, 1))
       const sortOrder = Number.isFinite(Number(product?.sortOrder)) ? Number(product.sortOrder) : 0
+      const notice = Array.isArray(product?.notice)
+        ? product.notice.map(item => String(item || '').trim()).filter(Boolean).join('\n')
+        : String(product?.notice ?? '').trim()
       return {
         key,
         productName,
@@ -747,7 +744,8 @@ router.put('/purchase-settings', async (req, res) => {
         sortOrder,
         isActive: product?.isActive !== false,
         isNoWarranty: Boolean(product?.isNoWarranty),
-        isAntiBan: Boolean(product?.isAntiBan)
+        isAntiBan: Boolean(product?.isAntiBan),
+        notice
       }
     })
 
@@ -760,7 +758,6 @@ router.put('/purchase-settings', async (req, res) => {
     }
 
     upsertSystemConfigValue(db, 'purchase_products', JSON.stringify(uniqueProducts))
-    upsertSystemConfigValue(db, 'purchase_notice', notice)
     upsertSystemConfigValue(db, 'purchase_order_expire_minutes', expireMinutes)
 
     const warrantyProduct = uniqueProducts.find(item => item.key === 'warranty')
@@ -789,7 +786,6 @@ router.put('/purchase-settings', async (req, res) => {
     res.json({
       purchase: {
         expireMinutes: updated.expireMinutes,
-        notice: updated.notice,
         products: updated.products,
         stored: updated.stored
       }

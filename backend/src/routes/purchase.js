@@ -152,12 +152,12 @@ const getPurchasePlans = async (db) => {
     sortOrder: Number.isFinite(Number(product.sortOrder)) ? Number(product.sortOrder) : 0,
     isActive: product.isActive !== false,
     isNoWarranty: Boolean(product.isNoWarranty),
-    isAntiBan: Boolean(product.isAntiBan)
+    isAntiBan: Boolean(product.isAntiBan),
+    notice: product.notice
   }))
 
   return {
     expireMinutes: settings.expireMinutes,
-    notice: settings.notice,
     products
   }
 }
@@ -1083,7 +1083,7 @@ const reserveDemotedCode = (db, { orderNo, email }) => {
 router.get('/meta', async (req, res) => {
   try {
     const db = await getDatabase()
-    const { products, expireMinutes, notice } = await getPurchasePlans(db)
+    const { products, expireMinutes } = await getPurchasePlans(db)
     await withLocks(['purchase'], async () => {
       const released = cleanupExpiredOrders(db, { expireMinutes })
       if (released) {
@@ -1105,6 +1105,7 @@ router.get('/meta', async (req, res) => {
           sortOrder: plan.sortOrder,
           isNoWarranty,
           isAntiBan,
+          notice: normalizePurchaseNotice(plan.notice),
           availableCount: isAntiBan ? antiBanAvailableCount : availableCount,
           buyerRewardPoints: isNoWarranty ? NO_WARRANTY_REWARD_POINTS : getPurchaseOrderRewardPoints(),
           inviteRewardPoints: isNoWarranty ? NO_WARRANTY_REWARD_POINTS : getInviteOrderRewardPoints()
@@ -1116,8 +1117,7 @@ router.get('/meta', async (req, res) => {
       productName: fallbackPlan?.productName || '',
       amount: fallbackPlan?.amount || '0.00',
       serviceDays: fallbackPlan?.serviceDays || 0,
-      availableCount,
-      notice: normalizePurchaseNotice(notice)
+      availableCount
     })
   } catch (error) {
     console.error('[Purchase] meta error:', error)

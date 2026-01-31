@@ -11,8 +11,7 @@ const CONFIG_KEYS = [
   'purchase_anti_ban_product_name',
   'purchase_anti_ban_price',
   'purchase_anti_ban_service_days',
-  'purchase_products',
-  'purchase_notice'
+  'purchase_products'
 ]
 
 const CACHE_TTL_MS = 60 * 1000
@@ -72,7 +71,6 @@ export const getPurchaseSettingsFromEnv = () => {
 
   return {
     expireMinutes,
-    notice,
     products: [
       {
         key: 'warranty',
@@ -134,7 +132,6 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
   const amount = normalizeMoney(resolveTrimmedString('purchase_price', env.products[0].amount), env.products[0].amount)
   const serviceDays = Math.max(1, toInt(resolveTrimmedString('purchase_service_days', env.products[0].serviceDays), env.products[0].serviceDays))
   const expireMinutes = Math.max(5, toInt(resolveTrimmedString('purchase_order_expire_minutes', env.expireMinutes), env.expireMinutes))
-  const notice = resolveTrimmedString('purchase_notice', env.notice)
 
   const noWarrantyProductName = resolveTrimmedString('purchase_no_warranty_product_name', env.products[2].productName)
   const noWarrantyAmount = normalizeMoney(resolveTrimmedString('purchase_no_warranty_price', env.products[2].amount), env.products[2].amount)
@@ -176,6 +173,9 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
     const isActiveResolved = input?.isActive === false ? false : Boolean(input?.isActive ?? true)
     const isNoWarrantyResolved = Boolean(input?.isNoWarranty ?? fallback?.isNoWarranty ?? false)
     const isAntiBanResolved = Boolean(input?.isAntiBan ?? fallback?.isAntiBan ?? false)
+    const noticeResolved = Array.isArray(input?.notice)
+      ? input.notice.map(item => String(item || '').trim()).filter(Boolean).join('\n')
+      : String(input?.notice ?? fallback?.notice ?? env.notice ?? '').trim()
     return {
       key,
       productName: productNameResolved,
@@ -184,7 +184,8 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
       sortOrder: sortOrderResolved,
       isActive: isActiveResolved,
       isNoWarranty: isNoWarrantyResolved,
-      isAntiBan: isAntiBanResolved
+      isAntiBan: isAntiBanResolved,
+      notice: noticeResolved
     }
   }
 
@@ -197,7 +198,8 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
       sortOrder: 1,
       isActive: true,
       isNoWarranty: false,
-      isAntiBan: false
+      isAntiBan: false,
+      notice: env.notice
     },
     {
       key: 'anti_ban',
@@ -207,7 +209,8 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
       sortOrder: 2,
       isActive: true,
       isNoWarranty: false,
-      isAntiBan: true
+      isAntiBan: true,
+      notice: env.notice
     },
     {
       key: 'no_warranty',
@@ -217,7 +220,8 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
       sortOrder: 3,
       isActive: true,
       isNoWarranty: true,
-      isAntiBan: false
+      isAntiBan: false,
+      notice: env.notice
     }
   ]
 
@@ -238,7 +242,6 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
 
   cachedSettings = {
     expireMinutes,
-    notice,
     products: uniqueProducts.length ? uniqueProducts : fallbackProducts,
     stored: {
       productName: stored.has('purchase_product_name'),
@@ -251,8 +254,7 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
       antiBanProductName: stored.has('purchase_anti_ban_product_name'),
       antiBanAmount: stored.has('purchase_anti_ban_price'),
       antiBanServiceDays: stored.has('purchase_anti_ban_service_days'),
-      products: stored.has('purchase_products'),
-      notice: stored.has('purchase_notice')
+      products: stored.has('purchase_products')
     }
   }
   cachedAt = now

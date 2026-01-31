@@ -424,7 +424,6 @@ export interface PurchaseMeta {
   serviceDays: number
   availableCount: number
   plans?: PurchasePlan[]
-  notice?: string[]
 }
 
 export interface PurchasePlan {
@@ -436,6 +435,7 @@ export interface PurchasePlan {
   sortOrder?: number
   isNoWarranty?: boolean
   isAntiBan?: boolean
+  notice?: string[]
   buyerRewardPoints?: number
   inviteRewardPoints?: number
 }
@@ -833,7 +833,6 @@ export interface AdminZpaySettingsResponse {
 export interface AdminPurchaseSettingsResponse {
   purchase: {
     expireMinutes: number
-    notice?: string
     products: Array<{
       key: string
       productName: string
@@ -843,6 +842,7 @@ export interface AdminPurchaseSettingsResponse {
       isActive?: boolean
       isNoWarranty?: boolean
       isAntiBan?: boolean
+      notice?: string
     }>
     stored?: {
       productName?: boolean
@@ -856,7 +856,6 @@ export interface AdminPurchaseSettingsResponse {
       antiBanAmount?: boolean
       antiBanServiceDays?: boolean
       products?: boolean
-      notice?: boolean
     }
   }
 }
@@ -1066,7 +1065,6 @@ export const adminService = {
 
   async updatePurchaseSettings(payload: {
     expireMinutes: number
-    notice?: string
     products: Array<{
       key: string
       productName: string
@@ -1076,6 +1074,7 @@ export const adminService = {
       isActive?: boolean
       isNoWarranty?: boolean
       isAntiBan?: boolean
+      notice?: string
     }>
   }): Promise<AdminPurchaseSettingsResponse> {
     const response = await api.put('/admin/purchase-settings', {
