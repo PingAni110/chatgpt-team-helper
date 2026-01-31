@@ -122,6 +122,19 @@ const formatDatetimeLocal = (date: Date) => {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
+const formatExpireAtDisplay = (expireAt?: string | null) => {
+  if (!expireAt) return '-'
+  const raw = String(expireAt).trim()
+  if (!raw) return '-'
+  const match = raw.match(/^(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2})(?::(\d{2}))?$/)
+  if (match) {
+    const [, year, month, day, hour, minute, second = '00'] = match
+    const iso = `${year}-${month}-${day}T${hour}:${minute}:${second}+08:00`
+    return formatShanghaiDate(new Date(iso), dateFormatOptions.value)
+  }
+  return formatShanghaiDate(raw, dateFormatOptions.value)
+}
+
 const decodeJwtPayload = (token: string) => {
   const raw = String(token || '').trim()
   if (!raw) return null
@@ -834,7 +847,7 @@ const handleInviteSubmit = async () => {
                 </td>
                 <td class="px-6 py-5 text-sm text-gray-500">
                   <div class="flex items-center gap-3">
-                    <span class="font-mono">{{ account.expireAt || '-' }}</span>
+                    <span class="font-mono">{{ formatExpireAtDisplay(account.expireAt) }}</span>
                     <Button
                       size="sm"
                       variant="outline"
@@ -950,7 +963,7 @@ const handleInviteSubmit = async () => {
             <div class="grid grid-cols-2 gap-4 text-xs text-gray-500 mb-4 bg-gray-50/50 p-3 rounded-xl">
           <div>
                   <p class="mb-1 text-gray-400">过期时间</p>
-                  <p class="font-mono text-gray-700">{{ account.expireAt || '-' }}</p>
+                  <p class="font-mono text-gray-700">{{ formatExpireAtDisplay(account.expireAt) }}</p>
                </div>
               <div class="flex items-end justify-end">
                 <Button
