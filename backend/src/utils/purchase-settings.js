@@ -11,7 +11,8 @@ const CONFIG_KEYS = [
   'purchase_anti_ban_product_name',
   'purchase_anti_ban_price',
   'purchase_anti_ban_service_days',
-  'purchase_products'
+  'purchase_products',
+  'purchase_notice'
 ]
 
 const CACHE_TTL_MS = 60 * 1000
@@ -52,6 +53,10 @@ export const getPurchaseSettingsFromEnv = () => {
   const amount = normalizeMoney(process.env.PURCHASE_PRICE ?? '1.00', '1.00')
   const serviceDays = Math.max(1, toInt(process.env.PURCHASE_SERVICE_DAYS, 30))
   const expireMinutes = Math.max(5, toInt(process.env.PURCHASE_ORDER_EXPIRE_MINUTES, 15))
+  const notice = String(
+    process.env.PURCHASE_NOTICE ||
+      '订单信息将发送至填写的邮箱，请确认邮箱可正常收信。\n支付成功后系统自动处理，无需手动兑换。\n如未收到邮件请检查垃圾箱，或使用"查询订单"页进行订单查询。'
+  ).trim()
 
   const noWarrantyAmount = normalizeMoney(process.env.PURCHASE_NO_WARRANTY_PRICE ?? '5.00', '5.00')
   const noWarrantyServiceDays = Math.max(1, toInt(process.env.PURCHASE_NO_WARRANTY_SERVICE_DAYS, serviceDays))
@@ -67,6 +72,7 @@ export const getPurchaseSettingsFromEnv = () => {
 
   return {
     expireMinutes,
+    notice,
     products: [
       {
         key: 'warranty',
@@ -128,6 +134,7 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
   const amount = normalizeMoney(resolveTrimmedString('purchase_price', env.products[0].amount), env.products[0].amount)
   const serviceDays = Math.max(1, toInt(resolveTrimmedString('purchase_service_days', env.products[0].serviceDays), env.products[0].serviceDays))
   const expireMinutes = Math.max(5, toInt(resolveTrimmedString('purchase_order_expire_minutes', env.expireMinutes), env.expireMinutes))
+  const notice = resolveTrimmedString('purchase_notice', env.notice)
 
   const noWarrantyProductName = resolveTrimmedString('purchase_no_warranty_product_name', env.products[2].productName)
   const noWarrantyAmount = normalizeMoney(resolveTrimmedString('purchase_no_warranty_price', env.products[2].amount), env.products[2].amount)
@@ -236,6 +243,7 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
 
   cachedSettings = {
     expireMinutes,
+    notice,
     products: uniqueProducts.length ? uniqueProducts : fallbackProducts,
     stored: {
       productName: stored.has('purchase_product_name'),
@@ -248,7 +256,8 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
       antiBanProductName: stored.has('purchase_anti_ban_product_name'),
       antiBanAmount: stored.has('purchase_anti_ban_price'),
       antiBanServiceDays: stored.has('purchase_anti_ban_service_days'),
-      products: stored.has('purchase_products')
+      products: stored.has('purchase_products'),
+      notice: stored.has('purchase_notice')
     }
   }
   cachedAt = now

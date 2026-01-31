@@ -158,8 +158,18 @@ const getPurchasePlans = async (db) => {
 
   return {
     expireMinutes: settings.expireMinutes,
+    notice: settings.notice,
     products
   }
+}
+
+const normalizePurchaseNotice = (value) => {
+  if (Array.isArray(value)) {
+    return value.map(item => String(item || '').trim()).filter(Boolean)
+  }
+  const raw = String(value || '').trim()
+  if (!raw) return []
+  return raw.split(/\r?\n/).map(item => item.trim()).filter(Boolean)
 }
 
 const getPurchasePlan = (orderType, products) => {
@@ -1074,7 +1084,7 @@ const reserveDemotedCode = (db, { orderNo, email }) => {
 router.get('/meta', async (req, res) => {
   try {
     const db = await getDatabase()
-    const { products, expireMinutes } = await getPurchasePlans(db)
+    const { products, expireMinutes, notice } = await getPurchasePlans(db)
     await withLocks(['purchase'], async () => {
       const released = cleanupExpiredOrders(db, { expireMinutes })
       if (released) {
@@ -1108,7 +1118,8 @@ router.get('/meta', async (req, res) => {
       productName: fallbackPlan?.productName || '',
       amount: fallbackPlan?.amount || '0.00',
       serviceDays: fallbackPlan?.serviceDays || 0,
-      availableCount
+      availableCount,
+      notice: normalizePurchaseNotice(notice)
     })
   } catch (error) {
     console.error('[Purchase] meta error:', error)

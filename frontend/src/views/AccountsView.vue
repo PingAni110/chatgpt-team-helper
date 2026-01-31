@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/dialog'
 import { useToast } from '@/components/ui/toast'
 import AppleNativeDateTimeInput from '@/components/ui/apple/NativeDateTimeInput.vue'
-import { Plus, Eye, EyeOff, RefreshCw, Ban, FilePenLine, Trash2, AlertTriangle, X, FolderOpen, Search } from 'lucide-vue-next'
+import { Plus, Eye, EyeOff, RefreshCw, Ban, FilePenLine, Trash2, AlertTriangle, FolderOpen, Search } from 'lucide-vue-next'
 
 const router = useRouter()
 const accounts = ref<GptAccount[]>([])
@@ -82,11 +82,12 @@ const syncingAccountId = ref<number | null>(null)
 const syncingAll = ref(false)
 const autoExpireAtUpdate = ref(false)
 const expireAtManuallyEdited = ref(false)
-const showSyncResultDialog = ref(false)
-const syncResult = ref<SyncUserCountResponse | null>(null)
-const syncError = ref('')
-const previousUserCount = ref<number | null>(null)
-const previousInviteCount = ref<number | null>(null)
+const memberDialogOpen = ref(false)
+const memberDialogAccount = ref<GptAccount | null>(null)
+const memberDialogError = ref('')
+const memberSearch = ref('')
+const memberUsers = ref<ChatgptAccountUser[]>([])
+const memberListLoading = ref(false)
 const deletingUserId = ref<string | null>(null)
 const revokingInviteEmail = ref<string | null>(null)
 const showInviteForm = ref(false)
@@ -103,11 +104,6 @@ const resyncingAfterAction = ref(false)
 const RESYNC_AFTER_ACTION_DELAY_MS = 3000
 let resyncAfterActionTimer: ReturnType<typeof setTimeout> | null = null
 let resyncAfterActionVersion = 0
-
-const memberAccountId = ref<string>('')
-const memberSearch = ref('')
-const memberList = ref<ChatgptAccountUser[]>([])
-const memberListLoading = ref(false)
 
 const formData = ref<CreateGptAccountDto>({
   email: '',
@@ -206,13 +202,6 @@ const loadAccounts = async () => {
     const response = await gptAccountService.getAll(params)
     accounts.value = response.accounts || []
     paginationMeta.value = response.pagination || { page: 1, pageSize: 10, total: 0 }
-    if (!memberAccountId.value && accounts.value.length > 0) {
-      memberAccountId.value = String(accounts.value[0]?.id ?? '')
-      const accountId = Number(memberAccountId.value)
-      if (Number.isFinite(accountId)) {
-        loadMembers(accountId)
-      }
-    }
   } catch (err: any) {
     error.value = err.response?.data?.error || 'Failed to load accounts'
     if (err.response?.status === 401 || err.response?.status === 403) {
@@ -224,17 +213,44 @@ const loadAccounts = async () => {
   }
 }
 
-const loadMembers = async (accountId: number) => {
+const loadMembers = async (accountId: number, { silent = false } = {}) => {
   if (!accountId) return
   memberListLoading.value = true
   try {
     const response = await gptAccountService.getMembers(accountId)
-    memberList.value = response.items || []
+    memberUsers.value = response.items || []
   } catch (err: any) {
-    showErrorToast(err.response?.data?.error || '加载成员列表失败')
+    if (!silent) {
+      showErrorToast(err.response?.data?.error || '加载成员列表失败')
+    }
   } finally {
     memberListLoading.value = false
   }
+}
+
+const openMemberDialog = async (account: GptAccount) => {
+  memberDialogAccount.value = account
+  memberDialogOpen.value = true
+  memberDialogError.value = ''
+  memberSearch.value = ''
+  memberUsers.value = []
+  activeTab.value = 'members'
+  showInviteForm.value = false
+
+  await loadMembers(account.id)
+  await loadInvites(account.id)
+}
+
+const closeMemberDialog = () => {
+  cancelResyncAfterAction()
+  memberDialogOpen.value = false
+  memberDialogAccount.value = null
+  memberDialogError.value = ''
+  memberSearch.value = ''
+  memberUsers.value = []
+  invitesList.value = []
+  activeTab.value = 'members'
+  resetInviteForm()
 }
 
 // 搜索处理
@@ -255,6 +271,12 @@ watch(openStatusFilter, () => {
     searchDebounceTimer = null
   }
   loadAccounts()
+})
+
+watch(memberDialogOpen, (open) => {
+  if (open) return
+  if (!memberDialogAccount.value) return
+  closeMemberDialog()
 })
 
 watch(searchQuery, () => {
@@ -411,8 +433,6 @@ const handleBanAccount = async (account: GptAccount) => {
 
 // 同步用户数量
 const applySyncResultToState = (result: SyncUserCountResponse) => {
-  syncResult.value = result
-
   const index = accounts.value.findIndex(a => a.id === result.account.id)
   if (index !== -1) {
     const current = accounts.value[index]
@@ -429,6 +449,22 @@ const applySyncResultToState = (result: SyncUserCountResponse) => {
       updatedAt: result.account.updatedAt
     }
     accounts.value = [...accounts.value]
+  }
+}
+
+const applySyncResultToDialog = (result: SyncUserCountResponse) => {
+  if (!memberDialogAccount.value) return
+  if (memberDialogAccount.value.id !== result.account.id) return
+  const nextInviteCount = typeof result.inviteCount === 'number'
+    ? result.inviteCount
+    : typeof result.account.inviteCount === 'number'
+      ? result.account.inviteCount
+      : memberDialogAccount.value.inviteCount
+  memberDialogAccount.value = {
+    ...memberDialogAccount.value,
+    ...result.account,
+    userCount: result.syncedUserCount,
+    inviteCount: typeof nextInviteCount === 'number' ? nextInviteCount : memberDialogAccount.value.inviteCount
   }
 }
 
@@ -456,16 +492,13 @@ const scheduleResyncAfterAction = (accountId: number) => {
   resyncAfterActionTimer = setTimeout(async () => {
     try {
       if (version !== resyncAfterActionVersion) return
-      if (!showSyncResultDialog.value) return
-      if (syncResult.value?.account?.id !== accountId) return
-
-      previousUserCount.value = syncResult.value?.syncedUserCount ?? previousUserCount.value
-      previousInviteCount.value = syncResult.value?.inviteCount ?? previousInviteCount.value
+      if (!memberDialogOpen.value) return
+      if (memberDialogAccount.value?.id !== accountId) return
 
       const latestResult = await gptAccountService.syncUserCount(accountId)
       if (version !== resyncAfterActionVersion) return
       applySyncResultToState(latestResult)
-
+      memberUsers.value = latestResult.users?.items || memberUsers.value
       await loadInvites(accountId)
     } catch (err: any) {
       if (version !== resyncAfterActionVersion) return
@@ -483,28 +516,20 @@ const scheduleResyncAfterAction = (accountId: number) => {
 const handleSyncUserCount = async (account: GptAccount) => {
   cancelResyncAfterAction()
   syncingAccountId.value = account.id
-  syncError.value = ''
-  syncResult.value = null
-  invitesList.value = []
-  activeTab.value = 'members'
-  previousUserCount.value = account.userCount
-  previousInviteCount.value = typeof account.inviteCount === 'number' ? account.inviteCount : null
+  memberDialogError.value = ''
 
   try {
     const result = await gptAccountService.syncUserCount(account.id)
     applySyncResultToState(result)
-    if (Number(memberAccountId.value) === account.id) {
-      memberList.value = result.users?.items || []
+    applySyncResultToDialog(result)
+    if (memberDialogOpen.value && memberDialogAccount.value?.id === account.id) {
+      memberUsers.value = result.users?.items || memberUsers.value
+      await loadInvites(account.id)
     }
-
-    // 显示同步结果对话框
-    showSyncResultDialog.value = true
-    
-    // 加载待加入列表
-    loadInvites(account.id)
+    showSuccessToast('同步完成')
   } catch (err: any) {
-    syncError.value = err.response?.data?.error || '同步失败，请检查网络连接和账号配置'
-    showSyncResultDialog.value = true
+    memberDialogError.value = err.response?.data?.error || '同步失败，请检查网络连接和账号配置'
+    showErrorToast(memberDialogError.value)
   } finally {
     syncingAccountId.value = null
   }
@@ -521,9 +546,9 @@ const handleSyncAll = async () => {
       showSuccessToast(`同步完成：成功 ${result.successCount} 个`)
     }
     await loadAccounts()
-    const accountId = Number(memberAccountId.value)
-    if (Number.isFinite(accountId)) {
-      await loadMembers(accountId)
+    if (memberDialogOpen.value && memberDialogAccount.value?.id) {
+      await loadMembers(memberDialogAccount.value.id, { silent: true })
+      await loadInvites(memberDialogAccount.value.id)
     }
   } catch (err: any) {
     showErrorToast(err.response?.data?.error || '同步失败，请稍后再试')
@@ -532,19 +557,10 @@ const handleSyncAll = async () => {
   }
 }
 
-watch(memberAccountId, (next) => {
-  const accountId = Number(next)
-  if (Number.isFinite(accountId)) {
-    loadMembers(accountId)
-  } else {
-    memberList.value = []
-  }
-})
-
 const filteredMembers = computed(() => {
   const query = memberSearch.value.trim().toLowerCase()
-  if (!query) return memberList.value
-  return memberList.value.filter(member => {
+  if (!query) return memberUsers.value
+  return memberUsers.value.filter(member => {
     const name = String(member.name || '').toLowerCase()
     const email = String(member.email || '').toLowerCase()
     return name.includes(query) || email.includes(query)
@@ -569,21 +585,8 @@ const resetInviteForm = () => {
   inviting.value = false
 }
 
-// 关闭同步结果对话框
-const closeSyncResultDialog = () => {
-  cancelResyncAfterAction()
-  showSyncResultDialog.value = false
-  syncResult.value = null
-  syncError.value = ''
-  previousUserCount.value = null
-  previousInviteCount.value = null
-  invitesList.value = []
-  activeTab.value = 'members'
-  resetInviteForm()
-}
-
 const handleDeleteSyncedUser = async (userId?: string) => {
-  if (!syncResult.value || !syncResult.value.account || !userId) {
+  if (!memberDialogAccount.value || !userId) {
     showErrorToast('缺少必要的账号或成员信息')
     return
   }
@@ -594,10 +597,11 @@ const handleDeleteSyncedUser = async (userId?: string) => {
 
   deletingUserId.value = userId
   try {
-    previousUserCount.value = syncResult.value?.syncedUserCount ?? previousUserCount.value
-    const result = await gptAccountService.deleteAccountUser(syncResult.value.account.id, userId)
+    const result = await gptAccountService.deleteAccountUser(memberDialogAccount.value.id, userId)
     applySyncResultToState(result)
+    applySyncResultToDialog(result)
     showSuccessToast(result.message || '成员已删除')
+    memberUsers.value = result.users?.items || memberUsers.value
     scheduleResyncAfterAction(result.account.id)
   } catch (err: any) {
     showErrorToast(err.response?.data?.error || '删除失败')
@@ -607,7 +611,7 @@ const handleDeleteSyncedUser = async (userId?: string) => {
 }
 
 const handleRevokeInvite = async (emailAddress?: string) => {
-  if (!syncResult.value?.account?.id) {
+  if (!memberDialogAccount.value?.id) {
     showErrorToast('请先同步账号后再撤回邀请')
     return
   }
@@ -624,15 +628,10 @@ const handleRevokeInvite = async (emailAddress?: string) => {
   }
 
   revokingInviteEmail.value = normalizedEmail
-  const currentInviteCount = syncResult.value.inviteCount ?? 0
 
   try {
-    const result = await gptAccountService.deleteAccountInvite(syncResult.value.account.id, normalizedEmail)
+    const result = await gptAccountService.deleteAccountInvite(memberDialogAccount.value.id, normalizedEmail)
     showSuccessToast(result.message || '邀请已撤回')
-
-    previousInviteCount.value = currentInviteCount
-    syncResult.value.account = result.account
-    syncResult.value.inviteCount = result.inviteCount
 
     const index = accounts.value.findIndex(a => a.id === result.account.id)
     if (index !== -1) {
@@ -646,12 +645,19 @@ const handleRevokeInvite = async (emailAddress?: string) => {
         accounts.value = [...accounts.value]
       }
     }
+    if (memberDialogAccount.value?.id === result.account.id) {
+      memberDialogAccount.value = {
+        ...memberDialogAccount.value,
+        ...result.account,
+        inviteCount: result.inviteCount
+      }
+    }
 
     invitesList.value = invitesList.value.filter(invite => {
       const inviteEmail = String(invite.email_address || '').trim().toLowerCase()
       return inviteEmail !== normalizedEmail
     })
-    scheduleResyncAfterAction(syncResult.value.account.id)
+    scheduleResyncAfterAction(memberDialogAccount.value.id)
   } catch (err: any) {
     showErrorToast(err.response?.data?.error || '撤回邀请失败')
   } finally {
@@ -660,7 +666,7 @@ const handleRevokeInvite = async (emailAddress?: string) => {
 }
 
 const handleInviteSubmit = async () => {
-  if (!syncResult.value || !syncResult.value.account) {
+  if (!memberDialogAccount.value) {
     showErrorToast('请先同步账号后再邀请成员')
     return
   }
@@ -680,12 +686,12 @@ const handleInviteSubmit = async () => {
 
   inviting.value = true
   try {
-    const result = await gptAccountService.inviteAccountUser(syncResult.value.account.id, email)
+    const result = await gptAccountService.inviteAccountUser(memberDialogAccount.value.id, email)
     showSuccessToast(result.message || '邀请已发送')
     resetInviteForm()
     // 切换到邀请列表 Tab
     activeTab.value = 'invites'
-    scheduleResyncAfterAction(syncResult.value.account.id)
+    scheduleResyncAfterAction(memberDialogAccount.value.id)
   } catch (err: any) {
     showErrorToast(err.response?.data?.error || '邀请失败')
   } finally {
@@ -826,7 +832,19 @@ const handleInviteSubmit = async () => {
                     {{ account.isDemoted ? '已降级' : '未降级' }}
                   </span>
                 </td>
-                <td class="px-6 py-5 text-sm text-gray-500 font-mono">{{ account.expireAt || '-' }}</td>
+                <td class="px-6 py-5 text-sm text-gray-500">
+                  <div class="flex items-center gap-3">
+                    <span class="font-mono">{{ account.expireAt || '-' }}</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      class="h-7 rounded-lg text-xs border-gray-200"
+                      @click="openMemberDialog(account)"
+                    >
+                      成员
+                    </Button>
+                  </div>
+                </td>
                 <td class="px-6 py-5 text-right">
                   <div class="flex items-center justify-end gap-1">
                     <!-- Toggle Open -->
@@ -934,6 +952,16 @@ const handleInviteSubmit = async () => {
                   <p class="mb-1 text-gray-400">过期时间</p>
                   <p class="font-mono text-gray-700">{{ account.expireAt || '-' }}</p>
                </div>
+              <div class="flex items-end justify-end">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  class="h-8 rounded-lg text-xs border-gray-200"
+                  @click="openMemberDialog(account)"
+                >
+                  成员
+                </Button>
+              </div>
             </div>
 
             <div class="flex items-center justify-between gap-2 pt-2 border-t border-gray-50">
@@ -1013,75 +1041,6 @@ const handleInviteSubmit = async () => {
         </div>
       </div>
     </div>
-
-    <!-- 成员列表（同步后缓存） -->
-    <Card class="border border-gray-100 shadow-sm">
-      <CardContent class="p-6 space-y-4">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h3 class="text-lg font-semibold text-gray-900">成员列表</h3>
-            <p class="text-sm text-gray-500">显示最近同步后的成员数据（不自动同步）。</p>
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            class="rounded-lg text-xs h-8 border-gray-200"
-            :disabled="!memberAccountId || memberListLoading"
-            @click="() => {
-              const accountId = Number(memberAccountId)
-              if (Number.isFinite(accountId)) loadMembers(accountId)
-            }"
-          >
-            刷新列表
-          </Button>
-        </div>
-
-        <div class="grid gap-4 md:grid-cols-[220px_1fr]">
-          <div class="space-y-2">
-            <Label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">选择空间</Label>
-            <Select v-model="memberAccountId">
-              <SelectTrigger class="h-10">
-                <SelectValue placeholder="选择账号" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="account in accounts" :key="account.id" :value="String(account.id)">
-                  {{ account.email }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div class="space-y-2">
-            <Label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">搜索成员</Label>
-            <Input v-model="memberSearch" placeholder="搜索成员姓名或邮箱..." class="h-10" />
-          </div>
-        </div>
-
-        <div class="border border-gray-100 rounded-xl overflow-hidden">
-          <table class="w-full text-sm">
-            <thead class="bg-gray-50 text-gray-500 text-xs uppercase">
-              <tr>
-                <th class="px-4 py-3 text-left font-medium">成员</th>
-                <th class="px-4 py-3 text-left font-medium">邮箱</th>
-                <th class="px-4 py-3 text-left font-medium">角色</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-50">
-              <tr v-if="memberListLoading">
-                <td colspan="3" class="px-4 py-6 text-center text-gray-400">正在加载成员...</td>
-              </tr>
-              <tr v-else-if="filteredMembers.length === 0">
-                <td colspan="3" class="px-4 py-6 text-center text-gray-400">暂无成员数据</td>
-              </tr>
-              <tr v-for="member in filteredMembers" :key="member.id">
-                <td class="px-4 py-3 text-gray-900">{{ member.name || '-' }}</td>
-                <td class="px-4 py-3 text-gray-600">{{ member.email || '-' }}</td>
-                <td class="px-4 py-3 text-gray-600 capitalize">{{ member.role || '-' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </CardContent>
-    </Card>
 
     <!-- Edit Dialog -->
     <Dialog v-model:open="showDialog">
@@ -1211,201 +1170,208 @@ const handleInviteSubmit = async () => {
       </DialogContent>
     </Dialog>
 
-    <!-- Sync Result Dialog -->
-    <Dialog v-model:open="showSyncResultDialog">
-   <DialogContent class="sm:max-w-[800px] p-0 overflow-hidden bg-white border-none shadow-2xl rounded-3xl">
-      <div class="relative w-full">
-        <div v-if="syncResult" class="flex flex-col h-[600px]">
-           <!-- Header -->
-           <div class="px-8 py-6 bg-green-50/50 border-b border-green-100 flex flex-col md:flex-row md:items-center justify-between gap-6 pr-12 relative">
+    <!-- Member Dialog -->
+    <Dialog v-model:open="memberDialogOpen">
+      <DialogContent class="sm:max-w-[900px] p-0 overflow-hidden bg-white border-none shadow-2xl rounded-3xl">
+        <div class="relative w-full">
+          <div class="flex flex-col h-[650px]">
+            <!-- Header -->
+            <div class="px-8 py-6 bg-gray-50/70 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-6 pr-12">
               <div>
-                 <h3 class="text-xl font-bold text-green-900 flex items-center gap-2">
-                    <span class="w-2 h-2 rounded-full bg-green-500"></span>
-                    同步成功
-                 </h3>
-                 <p class="text-green-700/80 text-sm mt-1">{{ syncResult.message }}</p>
-                 <p class="text-green-600/50 text-xs mt-2 flex items-center gap-1">
-                    <span class="w-1 h-1 rounded-full bg-green-400"></span>
-                    更新于 {{ formatShanghaiDate(syncResult.account.updatedAt, dateFormatOptions) }}
-                 </p>
+                <h3 class="text-xl font-bold text-gray-900">成员管理</h3>
+                <p class="text-sm text-gray-500 mt-1">
+                  {{ memberDialogAccount?.email || '未选择账号' }}
+                </p>
+                <p v-if="memberDialogAccount?.updatedAt" class="text-xs text-gray-400 mt-2">
+                  更新于 {{ formatShanghaiDate(memberDialogAccount.updatedAt, dateFormatOptions) }}
+                </p>
               </div>
-              
-              <div class="flex items-center gap-8 md:gap-12 border-t md:border-t-0 md:border-l border-green-200/50 pt-4 md:pt-0 md:pl-8">
-                 <!-- 当前人数 -->
-                 <div class="text-right">
-                    <p class="text-xs font-medium text-green-600/60 uppercase tracking-wider mb-1">当前人数</p>
-                    <div class="flex items-baseline gap-1 justify-end">
-                       <span v-if="previousUserCount !== null && previousUserCount !== syncResult.syncedUserCount" class="text-xl font-semibold text-green-600/40 mr-1">
-                          {{ previousUserCount }} <span class="text-sm mx-0.5">→</span>
-                       </span>
-                       <span class="text-3xl font-bold text-green-600">{{ syncResult.syncedUserCount }}</span>
-                       <span class="text-sm text-green-600 font-medium">人</span>
-                    </div>
-                 </div>
 
-                 <!-- 待加入 -->
-                 <div class="text-right">
-                    <p class="text-xs font-medium text-green-600/60 uppercase tracking-wider mb-1">待加入人数</p>
-                    <div class="flex items-baseline gap-1 justify-end">
-                       <span v-if="previousInviteCount !== null && previousInviteCount !== (syncResult.inviteCount ?? 0)" class="text-xl font-semibold text-green-600/40 mr-1">
-                          {{ previousInviteCount }} <span class="text-sm mx-0.5">→</span>
-                       </span>
-                       <span class="text-3xl font-bold text-green-600">{{ syncResult.inviteCount ?? 0 }}</span>
-                       <span class="text-sm text-green-600 font-medium">待</span>
-                    </div>
-                 </div>
+              <div class="flex items-center gap-6 md:gap-10 border-t md:border-t-0 md:border-l border-gray-200/70 pt-4 md:pt-0 md:pl-8">
+                <div class="text-right">
+                  <p class="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">当前人数</p>
+                  <div class="flex items-baseline gap-1 justify-end">
+                    <span class="text-3xl font-bold text-gray-900">{{ memberDialogAccount?.userCount ?? 0 }}</span>
+                    <span class="text-sm text-gray-500 font-medium">人</span>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <p class="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">待加入人数</p>
+                  <div class="flex items-baseline gap-1 justify-end">
+                    <span class="text-3xl font-bold text-gray-900">{{ memberDialogAccount?.inviteCount ?? 0 }}</span>
+                    <span class="text-sm text-gray-500 font-medium">待</span>
+                  </div>
+                </div>
               </div>
-           </div>
+            </div>
 
-           <!-- Content -->
-           <div class="flex-1 overflow-y-auto p-8">
+            <!-- Content -->
+            <div class="flex-1 overflow-y-auto p-8 space-y-4">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-xl w-fit">
+                  <button
+                    @click="activeTab = 'members'"
+                    class="px-4 py-1.5 rounded-lg text-sm font-medium transition-all"
+                    :class="activeTab === 'members' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
+                  >
+                    成员列表
+                  </button>
+                  <button
+                    @click="activeTab = 'invites'"
+                    class="px-4 py-1.5 rounded-lg text-sm font-medium transition-all"
+                    :class="activeTab === 'invites' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
+                  >
+                    待加入列表
+                  </button>
+                </div>
 
-              <div class="space-y-4">
-                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <!-- Tabs -->
-                    <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-xl w-fit">
-                       <button
-                          @click="activeTab = 'members'"
-                          class="px-4 py-1.5 rounded-lg text-sm font-medium transition-all"
-                          :class="activeTab === 'members' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
-                 >
-                          成员列表
-                       </button>
-                       <button
-                          @click="activeTab = 'invites'"
-                          class="px-4 py-1.5 rounded-lg text-sm font-medium transition-all"
-                          :class="activeTab === 'invites' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
-                       >
-                          待加入列表
-                       </button>
-                    </div>
-
-                    <Button size="sm" variant="outline" class="rounded-lg text-xs h-8 border-gray-200" @click="showInviteForm = !showInviteForm">
-                       {{ showInviteForm ? '取消' : '邀请新成员' }}
-                    </Button>
-                 </div>
-
-                 <!-- Invite Form -->
-                 <div v-if="showInviteForm" class="p-4 bg-blue-50/50 rounded-xl border border-blue-100 animate-in fade-in slide-in-from-top-2">
-                    <div class="flex gap-2">
-                       <Input v-model="inviteEmail" placeholder="输入邮箱地址..." class="bg-white h-10 border-blue-200 focus:border-blue-400" />
-                       <Button @click="handleInviteSubmit" :disabled="inviting" class="bg-blue-600 hover:bg-blue-700 text-white h-10 px-4 whitespace-nowrap">
-                          发送邀请
-                       </Button>
-                    </div>
-                 </div>
-
-                 <!-- Members Table -->
-                 <div v-show="activeTab === 'members'" class="border border-gray-100 rounded-xl overflow-hidden">
-                    <table class="w-full text-sm">
-                       <thead class="bg-gray-50 text-gray-500 text-xs uppercase">
-                          <tr>
-                             <th class="px-4 py-3 text-left font-medium">用户</th>
-                             <th class="px-4 py-3 text-left font-medium">角色</th>
-                             <th class="px-4 py-3 text-right font-medium">操作</th>
-                          </tr>
-                       </thead>
-                       <tbody class="divide-y divide-gray-50">
-                          <tr v-for="user in syncResult.users?.items" :key="user.id" class="group hover:bg-gray-50/50">
-                             <td class="px-4 py-3">
-                          <div class="font-medium text-gray-900">{{ user.name }}</div>
-                                <div class="text-xs text-gray-400">{{ user.email }}</div>
-                             </td>
-                             <td class="px-4 py-3 text-gray-500">
-                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 capitalize">
-                                   {{ user.role }}
-                                </span>
-                             </td>
-                             <td class="px-4 py-3 text-right">
-                                <button 
-                                   v-if="!['account-owner', 'account-admin'].includes((user.role || '').toLowerCase())"
-                                   class="text-gray-400 hover:text-red-600 transition-colors p-1 rounded hover:bg-red-50"
-                                   @click="handleDeleteSyncedUser(user.id || user.account_user_id || '')"
-                                   :disabled="deletingUserId === (user.id || user.account_user_id)"
-                                >
-                                   <Trash2 class="w-4 h-4" />
-              </button>
-                             </td>
-                          </tr>
-                          <tr v-if="!syncResult.users?.items?.length">
-                             <td colspan="3" class="px-4 py-8 text-center text-gray-400">暂无成员数据</td>
-                          </tr>
-                       </tbody>
-                    </table>
-                 </div>
-
-                 <!-- Invites Table -->
-                 <div v-show="activeTab === 'invites'" class="border border-gray-100 rounded-xl overflow-hidden">
-                     <div v-if="loadingInvites" class="p-8 flex justify-center">
-                        <div class="w-6 h-6 border-2 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
-                     </div>
-                     <table v-else class="w-full text-sm">
-                       <thead class="bg-gray-50 text-gray-500 text-xs uppercase">
-                          <tr>
-                             <th class="px-4 py-3 text-left font-medium">受邀邮箱</th>
-                             <th class="px-4 py-3 text-left font-medium">角色</th>
-                             <th class="px-4 py-3 text-left font-medium">邀请时间</th>
-                             <th class="px-4 py-3 text-right font-medium">操作</th>
-                          </tr>
-                       </thead>
-                       <tbody class="divide-y divide-gray-50">
-                          <tr v-for="invite in invitesList" :key="invite.id" class="group hover:bg-gray-50/50">
-                             <td class="px-4 py-3">
-                                <div class="font-medium text-gray-900">{{ invite.email_address }}</div>
-                             </td>
-                             <td class="px-4 py-3 text-gray-500">
-                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 capitalize">
-                                   {{ invite.role }}
-                                </span>
-                             </td>
-                             <td class="px-4 py-3 text-gray-500 text-xs">
-                                {{ formatShanghaiDate(invite.created_time || '', dateFormatOptions) }}
-                             </td>
-                             <td class="px-4 py-3 text-right">
-                                <button
-                                  class="text-gray-400 hover:text-red-600 transition-colors p-1 rounded hover:bg-red-50 disabled:opacity-50 disabled:hover:bg-transparent"
-                                  @click="handleRevokeInvite(invite.email_address)"
-                                  :disabled="!invite.email_address || revokingInviteEmail === String(invite.email_address).trim().toLowerCase()"
-                                  title="撤回邀请"
-                                >
-                                  <span v-if="revokingInviteEmail === String(invite.email_address).trim().toLowerCase()" class="animate-spin">⏳</span>
-                                  <Trash2 v-else class="w-4 h-4" />
-                                </button>
-                             </td>
-                          </tr>
-                          <tr v-if="!invitesList.length">
-                             <td colspan="4" class="px-4 py-8 text-center text-gray-400">暂无待加入邀请</td>
-                          </tr>
-                       </tbody>
-                    </table>
-                 </div>
-
+                <div class="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    class="rounded-lg text-xs h-8 border-gray-200"
+                    :disabled="!memberDialogAccount"
+                    @click="memberDialogAccount && loadMembers(memberDialogAccount.id)"
+                  >
+                    刷新列表
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    class="rounded-lg text-xs h-8 border-gray-200"
+                    :disabled="!memberDialogAccount || syncingAccountId === memberDialogAccount?.id"
+                    @click="memberDialogAccount && handleSyncUserCount(memberDialogAccount)"
+                  >
+                    <RefreshCw class="w-3 h-3 mr-1" :class="{ 'animate-spin': syncingAccountId === memberDialogAccount?.id }" />
+                    同步成员
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    class="rounded-lg text-xs h-8 border-gray-200"
+                    @click="showInviteForm = !showInviteForm"
+                  >
+                    {{ showInviteForm ? '取消邀请' : '邀请新成员' }}
+                  </Button>
+                </div>
               </div>
-           </div>
 
-           <!-- Footer -->
-           <div class="px-8 py-4 border-t border-gray-100 bg-gray-50/50 flex justify-end">
-              <Button @click="closeSyncResultDialog" class="rounded-xl px-6 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50">关闭</Button>
-           </div>
-        </div>
+              <div class="grid gap-4 md:grid-cols-[1fr_320px]">
+                <div class="space-y-2">
+                  <Label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">搜索成员</Label>
+                  <Input v-model="memberSearch" placeholder="搜索成员姓名或邮箱..." class="h-10" />
+                </div>
+                <div v-if="memberDialogError" class="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600">
+                  {{ memberDialogError }}
+                </div>
+              </div>
 
-        <!-- Error State -->
-        <div v-else class="p-8 text-center space-y-6">
-           <div class="w-16 h-16 rounded-full bg-red-100 mx-auto flex items-center justify-center text-red-500">
-              <X class="w-8 h-8" />
-           </div>
-           <div>
-              <h3 class="text-xl font-bold text-gray-900">同步失败</h3>
-              <p class="text-gray-500 mt-2 max-w-sm mx-auto">{{ syncError }}</p>
-           </div>
-           <Button @click="closeSyncResultDialog" variant="outline" class="rounded-xl px-8">关闭</Button>
-        </div>
+              <div v-if="showInviteForm" class="p-4 bg-blue-50/50 rounded-xl border border-blue-100 animate-in fade-in slide-in-from-top-2">
+                <div class="flex gap-2">
+                  <Input v-model="inviteEmail" placeholder="输入邮箱地址..." class="bg-white h-10 border-blue-200 focus:border-blue-400" />
+                  <Button @click="handleInviteSubmit" :disabled="inviting" class="bg-blue-600 hover:bg-blue-700 text-white h-10 px-4 whitespace-nowrap">
+                    发送邀请
+                  </Button>
+                </div>
+              </div>
 
-        <div v-if="resyncingAfterAction" class="absolute inset-0 z-50 bg-white/70 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
-          <div class="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
-          <p class="text-sm text-gray-600 font-medium">正在同步成员信息...</p>
+              <div v-show="activeTab === 'members'" class="border border-gray-100 rounded-xl overflow-hidden">
+                <table class="w-full text-sm">
+                  <thead class="bg-gray-50 text-gray-500 text-xs uppercase">
+                    <tr>
+                      <th class="px-4 py-3 text-left font-medium">用户</th>
+                      <th class="px-4 py-3 text-left font-medium">角色</th>
+                      <th class="px-4 py-3 text-right font-medium">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-50">
+                    <tr v-if="memberListLoading">
+                      <td colspan="3" class="px-4 py-6 text-center text-gray-400">正在加载成员...</td>
+                    </tr>
+                    <tr v-else-if="filteredMembers.length === 0">
+                      <td colspan="3" class="px-4 py-6 text-center text-gray-400">暂无成员数据</td>
+                    </tr>
+                    <tr v-for="user in filteredMembers" :key="user.id" class="group hover:bg-gray-50/50">
+                      <td class="px-4 py-3">
+                        <div class="font-medium text-gray-900">{{ user.name || '-' }}</div>
+                        <div class="text-xs text-gray-400">{{ user.email }}</div>
+                      </td>
+                      <td class="px-4 py-3 text-gray-500">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 capitalize">
+                          {{ user.role || '-' }}
+                        </span>
+                      </td>
+                      <td class="px-4 py-3 text-right">
+                        <button
+                          v-if="!['account-owner', 'account-admin'].includes((user.role || '').toLowerCase())"
+                          class="text-gray-400 hover:text-red-600 transition-colors p-1 rounded hover:bg-red-50"
+                          @click="handleDeleteSyncedUser(user.id || user.account_user_id || '')"
+                          :disabled="deletingUserId === (user.id || user.account_user_id)"
+                        >
+                          <Trash2 class="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div v-show="activeTab === 'invites'" class="border border-gray-100 rounded-xl overflow-hidden">
+                <div v-if="loadingInvites" class="p-8 flex justify-center">
+                  <div class="w-6 h-6 border-2 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+                </div>
+                <table v-else class="w-full text-sm">
+                  <thead class="bg-gray-50 text-gray-500 text-xs uppercase">
+                    <tr>
+                      <th class="px-4 py-3 text-left font-medium">受邀邮箱</th>
+                      <th class="px-4 py-3 text-left font-medium">角色</th>
+                      <th class="px-4 py-3 text-left font-medium">邀请时间</th>
+                      <th class="px-4 py-3 text-right font-medium">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-50">
+                    <tr v-for="invite in invitesList" :key="invite.id" class="group hover:bg-gray-50/50">
+                      <td class="px-4 py-3">
+                        <div class="font-medium text-gray-900">{{ invite.email_address }}</div>
+                      </td>
+                      <td class="px-4 py-3 text-gray-500">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 capitalize">
+                          {{ invite.role }}
+                        </span>
+                      </td>
+                      <td class="px-4 py-3 text-gray-500 text-xs">
+                        {{ formatShanghaiDate(invite.created_time || '', dateFormatOptions) }}
+                      </td>
+                      <td class="px-4 py-3 text-right">
+                        <button
+                          class="text-gray-400 hover:text-red-600 transition-colors p-1 rounded hover:bg-red-50 disabled:opacity-50 disabled:hover:bg-transparent"
+                          @click="handleRevokeInvite(invite.email_address)"
+                          :disabled="!invite.email_address || revokingInviteEmail === String(invite.email_address).trim().toLowerCase()"
+                          title="撤回邀请"
+                        >
+                          <span v-if="revokingInviteEmail === String(invite.email_address).trim().toLowerCase()" class="animate-spin">⏳</span>
+                          <Trash2 v-else class="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                    <tr v-if="!invitesList.length">
+                      <td colspan="4" class="px-4 py-8 text-center text-gray-400">暂无待加入邀请</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="px-8 py-4 border-t border-gray-100 bg-gray-50/50 flex justify-end">
+              <Button @click="closeMemberDialog" class="rounded-xl px-6 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50">关闭</Button>
+            </div>
+          </div>
+
+          <div v-if="resyncingAfterAction" class="absolute inset-0 z-50 bg-white/70 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
+            <div class="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+            <p class="text-sm text-gray-600 font-medium">正在同步成员信息...</p>
+          </div>
         </div>
-      </div>
       </DialogContent>
     </Dialog>
   </div>

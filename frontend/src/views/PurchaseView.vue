@@ -183,17 +183,9 @@
           <div class="pt-6 border-t border-gray-200/60 dark:border-white/10">
             <h4 class="text-[13px] font-semibold text-[#86868b] uppercase tracking-wider mb-4">购买须知</h4>
             <ul class="space-y-3 text-[14px] text-[#1d1d1f]/70 dark:text-white/70">
-              <li class="flex items-start gap-3">
+              <li v-for="(item, idx) in purchaseNotices" :key="idx" class="flex items-start gap-3">
                 <span class="h-1.5 w-1.5 rounded-full bg-[#007AFF] mt-2 flex-shrink-0"></span>
-                <span>订单信息将发送至填写的邮箱，请确认邮箱可正常收信。</span>
-              </li>
-              <li class="flex items-start gap-3">
-                <span class="h-1.5 w-1.5 rounded-full bg-[#007AFF] mt-2 flex-shrink-0"></span>
-                <span>支付成功后系统自动开通，无需手动兑换。</span>
-              </li>
-              <li class="flex items-start gap-3">
-                <span class="h-1.5 w-1.5 rounded-full bg-[#007AFF] mt-2 flex-shrink-0"></span>
-                <span>如未收到邮件请检查垃圾箱，或使用“查询订单”页进行订单查询。</span>
+                <span>{{ item }}</span>
               </li>
             </ul>
           </div>
@@ -275,6 +267,16 @@ const planHint = (plan: PurchasePlan | null) => {
   if (plan.isNoWarranty) return '无质保方案'
   return '标准方案'
 }
+
+const purchaseNotices = computed(() => {
+  const notices = (meta.value?.notice || []).map(item => String(item || '').trim()).filter(Boolean)
+  if (notices.length) return notices
+  return [
+    '订单信息将发送至填写的邮箱，请确认邮箱可正常收信。',
+    '支付成功后系统自动处理，无需手动兑换。',
+    '如未收到邮件请检查垃圾箱，或使用“查询订单”页进行订单查询。'
+  ]
+})
 
 const currentAvailableCount = computed(() => (
   currentPlan.value?.availableCount ?? meta.value?.availableCount ?? 0

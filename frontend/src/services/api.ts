@@ -424,6 +424,7 @@ export interface PurchaseMeta {
   serviceDays: number
   availableCount: number
   plans?: PurchasePlan[]
+  notice?: string[]
 }
 
 export interface PurchasePlan {
@@ -833,6 +834,7 @@ export interface AdminZpaySettingsResponse {
 export interface AdminPurchaseSettingsResponse {
   purchase: {
     expireMinutes: number
+    notice?: string
     products: Array<{
       key: string
       productName: string
@@ -856,6 +858,7 @@ export interface AdminPurchaseSettingsResponse {
       antiBanAmount?: boolean
       antiBanServiceDays?: boolean
       products?: boolean
+      notice?: boolean
     }
   }
 }
@@ -1065,6 +1068,7 @@ export const adminService = {
 
   async updatePurchaseSettings(payload: {
     expireMinutes: number
+    notice?: string
     products: Array<{
       key: string
       productName: string

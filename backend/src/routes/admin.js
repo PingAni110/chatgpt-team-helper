@@ -698,6 +698,7 @@ router.get('/purchase-settings', async (req, res) => {
     res.json({
       purchase: {
         expireMinutes: settings.expireMinutes,
+        notice: settings.notice,
         products: settings.products,
         stored: settings.stored
       }
@@ -717,6 +718,10 @@ router.put('/purchase-settings', async (req, res) => {
     const env = getPurchaseSettingsFromEnv()
 
     const expireMinutes = Math.max(5, toInt(payload.expireMinutes ?? current.expireMinutes, env.expireMinutes))
+    const noticeInput = payload.notice
+    const notice = typeof noticeInput === 'string'
+      ? noticeInput.trim()
+      : String(current.notice ?? env.notice ?? '').trim()
 
     const inputProducts = Array.isArray(payload.products) ? payload.products : []
     if (!inputProducts.length) {
@@ -756,6 +761,7 @@ router.put('/purchase-settings', async (req, res) => {
     }
 
     upsertSystemConfigValue(db, 'purchase_products', JSON.stringify(uniqueProducts))
+    upsertSystemConfigValue(db, 'purchase_notice', notice)
     upsertSystemConfigValue(db, 'purchase_order_expire_minutes', expireMinutes)
 
     const warrantyProduct = uniqueProducts.find(item => item.key === 'warranty')
@@ -784,6 +790,7 @@ router.put('/purchase-settings', async (req, res) => {
     res.json({
       purchase: {
         expireMinutes: updated.expireMinutes,
+        notice: updated.notice,
         products: updated.products,
         stored: updated.stored
       }
