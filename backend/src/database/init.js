@@ -354,6 +354,18 @@ const ensureRbacTables = (database) => {
       }
     }
 
+    const removedMenuKeys = ['member_list']
+    for (const menuKey of removedMenuKeys) {
+      const key = String(menuKey || '').trim()
+      if (!key) continue
+      database.run('INSERT OR IGNORE INTO deleted_menu_keys (menu_key, deleted_at) VALUES (?, DATETIME(\'now\', \'localtime\'))', [key])
+      database.run(
+        `DELETE FROM role_menus WHERE menu_id IN (SELECT id FROM menus WHERE menu_key = ?)`,
+        [key]
+      )
+      database.run('DELETE FROM menus WHERE menu_key = ?', [key])
+    }
+
     const resolveMenuIdByKey = (menuKey) => {
       const key = String(menuKey || '').trim()
       if (!key) return null

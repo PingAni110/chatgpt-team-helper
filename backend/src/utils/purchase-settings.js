@@ -176,10 +176,6 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
     const isActiveResolved = input?.isActive === false ? false : Boolean(input?.isActive ?? true)
     const isNoWarrantyResolved = Boolean(input?.isNoWarranty ?? fallback?.isNoWarranty ?? false)
     const isAntiBanResolved = Boolean(input?.isAntiBan ?? fallback?.isAntiBan ?? false)
-    const descriptionResolved = String(input?.description ?? fallback?.description ?? '').trim()
-    const noticeResolved = Array.isArray(input?.notice)
-      ? input.notice.map(item => String(item || '').trim()).filter(Boolean).join('\n')
-      : String(input?.notice ?? fallback?.notice ?? '').trim()
     return {
       key,
       productName: productNameResolved,
@@ -188,9 +184,7 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
       sortOrder: sortOrderResolved,
       isActive: isActiveResolved,
       isNoWarranty: isNoWarrantyResolved,
-      isAntiBan: isAntiBanResolved,
-      description: descriptionResolved,
-      notice: noticeResolved
+      isAntiBan: isAntiBanResolved
     }
   }
 
@@ -203,9 +197,7 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
       sortOrder: 1,
       isActive: true,
       isNoWarranty: false,
-      isAntiBan: false,
-      description: '',
-      notice: ''
+      isAntiBan: false
     },
     {
       key: 'anti_ban',
@@ -215,9 +207,7 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
       sortOrder: 2,
       isActive: true,
       isNoWarranty: false,
-      isAntiBan: true,
-      description: '',
-      notice: ''
+      isAntiBan: true
     },
     {
       key: 'no_warranty',
@@ -227,9 +217,7 @@ export async function getPurchaseSettings(db, { forceRefresh = false } = {}) {
       sortOrder: 3,
       isActive: true,
       isNoWarranty: true,
-      isAntiBan: false,
-      description: '',
-      notice: ''
+      isAntiBan: false
     }
   ]
 

@@ -269,8 +269,7 @@ const planHint = (plan: PurchasePlan | null) => {
 }
 
 const purchaseNotices = computed(() => {
-  const planNotices = currentPlan.value?.notice || []
-  const notices = (planNotices.length ? planNotices : meta.value?.notice || [])
+  const notices = (meta.value?.notice || [])
     .map(item => String(item || '').trim())
     .filter(Boolean)
   if (notices.length) return notices
