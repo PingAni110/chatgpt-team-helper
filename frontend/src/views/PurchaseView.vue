@@ -252,7 +252,15 @@ const isValidEmail = computed(() => {
   return EMAIL_REGEX.test(email.value.trim())
 })
 
-const plans = computed<PurchasePlan[]>(() => meta.value?.plans || [])
+const plans = computed<PurchasePlan[]>(() => {
+  const allPlans = meta.value?.plans || []
+  return [...allPlans].sort((a, b) => {
+    const orderA = Number(a.sortOrder ?? 0)
+    const orderB = Number(b.sortOrder ?? 0)
+    if (orderA !== orderB) return orderA - orderB
+    return String(a.key || '').localeCompare(String(b.key || ''))
+  })
+})
 
 const currentPlan = computed<PurchasePlan | null>(() => {
   if (!plans.value.length) return null
@@ -356,6 +364,10 @@ const handleCreateOrder = async () => {
   }
   if (!EMAIL_REGEX.test(normalizedEmail)) {
     errorMessage.value = '请输入有效的邮箱地址'
+    return
+  }
+  if (!orderType.value) {
+    errorMessage.value = '请选择商品类型'
     return
   }
 
