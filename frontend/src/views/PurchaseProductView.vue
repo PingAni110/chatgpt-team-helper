@@ -159,42 +159,17 @@ interface NoteItem {
 }
 
 const notes = computed<NoteItem[]>(() => {
-  const common = (plan.value?.notice || [])
+  const noticeItems = (plan.value?.notice || [])
     .map(item => String(item || '').trim())
     .filter(Boolean)
-    .map(text => ({ text }))
-  const fallback: NoteItem[] = [
+  if (noticeItems.length) {
+    return noticeItems.map(text => ({ text }))
+  }
+  return [
     { text: '订单信息将发送至填写的邮箱，请确认邮箱可正常收信。' },
     { text: '支付成功后系统自动处理，无需手动兑换。' },
     { text: '如未收到邮件请检查垃圾箱，或使用"查询订单"页进行订单查询。' }
   ]
-  const resolvedCommon = common.length ? common : fallback
-
-  if (plan.value?.isNoWarranty) {
-    return [
-      { text: '无质保：不支持退款 / 补号。' },
-      { text: '仅提供首次登陆咨询与基础使用指导。' },
-      ...resolvedCommon
-    ]
-  }
-
-  if (!plan.value?.isAntiBan) {
-    return [
-      { text: '质保：支持退款 / 补号（按平台规则处理）。' },
-      { text: '遇到封号/异常可联系售后协助处理。' },
-      ...resolvedCommon
-    ]
-  }
-
-  if (plan.value?.isAntiBan) {
-    return [
-      { text: '经过特殊处理：开通后无法退出工作空间。', highlight: true },
-      { text: '质保：支持退款 / 补号（按平台规则处理）。' },
-      ...resolvedCommon
-    ]
-  }
-
-  return resolvedCommon
 })
 
 const loadMeta = async () => {
