@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/dialog'
 import { useToast } from '@/components/ui/toast'
 import AppleNativeDateTimeInput from '@/components/ui/apple/NativeDateTimeInput.vue'
-import { Plus, Eye, EyeOff, RefreshCw, Ban, FilePenLine, Trash2, AlertTriangle, FolderOpen, Search } from 'lucide-vue-next'
+import { Plus, Eye, EyeOff, RefreshCw, Ban, FilePenLine, Trash2, AlertTriangle, FolderOpen, Search, GripVertical } from 'lucide-vue-next'
 
 const router = useRouter()
 const accounts = ref<GptAccount[]>([])
@@ -95,6 +95,41 @@ const inviteEmail = ref('')
 const inviting = ref(false)
 const togglingOpenAccountId = ref<number | null>(null)
 const banningAccountId = ref<number | null>(null)
+const draggingAccountId = ref<number | null>(null)
+
+const formatExpireAtDisplay = (value?: string | null) => {
+  if (!value) return '-'
+  const trimmed = String(value || '').trim()
+  const isoLike = trimmed.replace(/\//g, '-').replace(' ', 'T')
+  const parsed = new Date(`${isoLike}Z`)
+  if (!Number.isNaN(parsed.getTime())) {
+    return formatShanghaiDate(parsed, dateFormatOptions.value)
+  }
+  return formatShanghaiDate(value, dateFormatOptions.value)
+}
+
+const handleDragStart = (account: GptAccount, event: DragEvent) => {
+  draggingAccountId.value = account.id
+  event.dataTransfer?.setData('text/plain', String(account.id))
+  event.dataTransfer?.setDragImage?.(event.currentTarget as Element, 0, 0)
+}
+
+const handleDragEnd = () => {
+  draggingAccountId.value = null
+}
+
+const handleDrop = (target: GptAccount) => {
+  const sourceId = draggingAccountId.value
+  if (!sourceId || sourceId === target.id) return
+  const current = [...accounts.value]
+  const sourceIndex = current.findIndex(item => item.id === sourceId)
+  const targetIndex = current.findIndex(item => item.id === target.id)
+  if (sourceIndex === -1 || targetIndex === -1) return
+  const [moved] = current.splice(sourceIndex, 1)
+  if (!moved) return
+  current.splice(targetIndex, 0, moved)
+  accounts.value = current
+}
 
 // Tab 和 邀请列表状态
 const activeTab = ref<'members' | 'invites'>('members')
@@ -787,6 +822,7 @@ const handleInviteSubmit = async () => {
               <tr class="border-b border-gray-100 bg-gray-50/50">
                 <th class="px-6 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">ID</th>
                 <th class="px-6 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">邮箱</th>
+                <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">排序</th>
                 <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">已加入</th>
                 <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">待加入</th>
                 <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">降级</th>
@@ -799,6 +835,8 @@ const handleInviteSubmit = async () => {
                 v-for="account in accounts"
                 :key="account.id"
                 class="group hover:bg-blue-50/30 transition-colors duration-200"
+                @dragover.prevent
+                @drop="handleDrop(account)"
               >
                 <td class="px-6 py-5 text-sm font-medium text-blue-500">#{{ account.id }}</td>
 	                <td class="px-6 py-5">
@@ -814,6 +852,17 @@ const handleInviteSubmit = async () => {
 	                    </span>
 	                  </div>
 	                </td>
+                <td class="px-6 py-5 text-center">
+                  <button
+                    class="inline-flex items-center justify-center h-8 w-8 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                    draggable="true"
+                    title="拖拽排序"
+                    @dragstart="handleDragStart(account, $event)"
+                    @dragend="handleDragEnd"
+                  >
+                    <GripVertical class="w-4 h-4" />
+                  </button>
+                </td>
                 <td class="px-6 py-5 text-center">
                   <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-100">
                     {{ account.userCount }} 人
@@ -834,7 +883,7 @@ const handleInviteSubmit = async () => {
                 </td>
                 <td class="px-6 py-5 text-sm text-gray-500">
                   <div class="flex items-center gap-3">
-                    <span class="font-mono">{{ account.expireAt || '-' }}</span>
+                    <span class="font-mono">{{ formatExpireAtDisplay(account.expireAt) }}</span>
                     <Button
                       size="sm"
                       variant="outline"
@@ -947,10 +996,14 @@ const handleInviteSubmit = async () => {
               </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-4 text-xs text-gray-500 mb-4 bg-gray-50/50 p-3 rounded-xl">
+            <div
+              class="grid grid-cols-2 gap-4 text-xs text-gray-500 mb-4 bg-gray-50/50 p-3 rounded-xl"
+              @dragover.prevent
+              @drop="handleDrop(account)"
+            >
           <div>
                   <p class="mb-1 text-gray-400">过期时间</p>
-                  <p class="font-mono text-gray-700">{{ account.expireAt || '-' }}</p>
+                  <p class="font-mono text-gray-700">{{ formatExpireAtDisplay(account.expireAt) }}</p>
                </div>
               <div class="flex items-end justify-end">
                 <Button
@@ -987,6 +1040,15 @@ const handleInviteSubmit = async () => {
 
                <!-- More Actions -->
                <div class="flex gap-1">
+                  <button
+                    class="inline-flex items-center justify-center h-9 w-9 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                    draggable="true"
+                    title="拖拽排序"
+                    @dragstart="handleDragStart(account, $event)"
+                    @dragend="handleDragEnd"
+                  >
+                    <GripVertical class="w-4 h-4" />
+                  </button>
                   <Button size="icon" variant="ghost" class="h-9 w-9 text-gray-400" @click="handleSyncUserCount(account)">
                      <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': syncingAccountId === account.id }" />
                   </Button>
