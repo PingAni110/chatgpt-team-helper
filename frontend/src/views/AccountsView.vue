@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/dialog'
 import { useToast } from '@/components/ui/toast'
 import AppleNativeDateTimeInput from '@/components/ui/apple/NativeDateTimeInput.vue'
-import { Plus, Eye, EyeOff, RefreshCw, Ban, FilePenLine, Trash2, AlertTriangle, FolderOpen, Search } from 'lucide-vue-next'
+import { Plus, Eye, EyeOff, RefreshCw, Ban, FilePenLine, Trash2, AlertTriangle, FolderOpen, Search, GripVertical } from 'lucide-vue-next'
 
 const router = useRouter()
 const accounts = ref<GptAccount[]>([])
@@ -82,6 +82,8 @@ const syncingAccountId = ref<number | null>(null)
 const syncingAll = ref(false)
 const autoExpireAtUpdate = ref(false)
 const expireAtManuallyEdited = ref(false)
+const draggingAccountId = ref<number | null>(null)
+const isReordering = ref(false)
 const memberDialogOpen = ref(false)
 const memberDialogAccount = ref<GptAccount | null>(null)
 const memberDialogError = ref('')
@@ -128,9 +130,11 @@ const formatExpireAtDisplay = (expireAt?: string | null) => {
   if (!raw) return '-'
   const match = raw.match(/^(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2})(?::(\d{2}))?$/)
   if (match) {
-    return raw
+    const [, year, month, day, hour, minute, second = '00'] = match
+    const iso = `${year}-${month}-${day}T${hour}:${minute}:${second}+08:00`
+    return formatShanghaiDate(new Date(iso), { locale: appConfigStore.locale, timeZone: 'Asia/Shanghai' })
   }
-  return formatShanghaiDate(raw, dateFormatOptions.value)
+  return formatShanghaiDate(raw, { locale: appConfigStore.locale, timeZone: 'Asia/Shanghai' })
 }
 
 const decodeJwtPayload = (token: string) => {
@@ -221,6 +225,45 @@ const loadAccounts = async () => {
     }
   } finally {
     loading.value = false
+  }
+}
+
+const handleDragStart = (account: GptAccount) => {
+  if (isReordering.value) return
+  draggingAccountId.value = account.id
+}
+
+const handleDragEnd = () => {
+  draggingAccountId.value = null
+}
+
+const handleDragOver = (event: DragEvent) => {
+  event.preventDefault()
+}
+
+const handleDrop = async (targetAccount: GptAccount) => {
+  if (isReordering.value) return
+  const sourceId = draggingAccountId.value
+  if (!sourceId || sourceId === targetAccount.id) return
+  const sourceIndex = accounts.value.findIndex(account => account.id === sourceId)
+  const targetIndex = accounts.value.findIndex(account => account.id === targetAccount.id)
+  if (sourceIndex < 0 || targetIndex < 0) return
+
+  const updated = [...accounts.value]
+  const [moved] = updated.splice(sourceIndex, 1)
+  updated.splice(targetIndex, 0, moved)
+  accounts.value = updated
+
+  isReordering.value = true
+  try {
+    await gptAccountService.reorder(updated.map(account => account.id))
+    showSuccessToast('账号排序已更新')
+  } catch (err: any) {
+    showErrorToast(err.response?.data?.error || '更新排序失败')
+    await loadAccounts()
+  } finally {
+    isReordering.value = false
+    draggingAccountId.value = null
   }
 }
 
@@ -759,6 +802,7 @@ const handleInviteSubmit = async () => {
           </SelectContent>
         </Select>
       </div>
+      <span class="text-xs text-gray-400">长按/拖拽账号调整顺序</span>
     </div>
 
     <!-- Error Message -->
@@ -796,6 +840,7 @@ const handleInviteSubmit = async () => {
           <table class="w-full">
             <thead>
               <tr class="border-b border-gray-100 bg-gray-50/50">
+                <th class="w-10 px-3 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider"></th>
                 <th class="px-6 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">ID</th>
                 <th class="px-6 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">邮箱</th>
                 <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">已加入</th>
@@ -810,7 +855,16 @@ const handleInviteSubmit = async () => {
                 v-for="account in accounts"
                 :key="account.id"
                 class="group hover:bg-blue-50/30 transition-colors duration-200"
+                :class="draggingAccountId === account.id ? 'opacity-60' : ''"
+                draggable="true"
+                @dragstart="handleDragStart(account)"
+                @dragend="handleDragEnd"
+                @dragover="handleDragOver"
+                @drop="handleDrop(account)"
               >
+                <td class="px-3 py-5 text-gray-400">
+                  <GripVertical class="w-4 h-4" />
+                </td>
                 <td class="px-6 py-5 text-sm font-medium text-blue-500">#{{ account.id }}</td>
 	                <td class="px-6 py-5">
 	                  <div class="flex items-center gap-3">
@@ -931,7 +985,17 @@ const handleInviteSubmit = async () => {
 
         <!-- Mobile Card List -->
         <div class="md:hidden p-4 space-y-4 bg-gray-50/50">
-          <div v-for="account in accounts" :key="account.id" class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+          <div
+            v-for="account in accounts"
+            :key="account.id"
+            class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100"
+            :class="draggingAccountId === account.id ? 'opacity-60' : ''"
+            draggable="true"
+            @dragstart="handleDragStart(account)"
+            @dragend="handleDragEnd"
+            @dragover="handleDragOver"
+            @drop="handleDrop(account)"
+          >
             <div class="flex items-start justify-between mb-4">
               <div class="flex items-center gap-3">
                  <div class="w-10 h-10 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center text-sm font-bold text-gray-600">
@@ -943,6 +1007,7 @@ const handleInviteSubmit = async () => {
                  </div>
               </div>
               <div class="flex flex-wrap justify-end gap-2">
+                 <GripVertical class="w-4 h-4 text-gray-400 mr-1" />
                  <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-100">
                     {{ account.userCount }} 人
                  </span>

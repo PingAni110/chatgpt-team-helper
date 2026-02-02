@@ -277,6 +277,7 @@ export interface GptAccount {
   chatgptAccountId?: string
   oaiDeviceId?: string
   expireAt?: string | null
+  sortOrder?: number
   createdAt: string
   updatedAt: string
 }
@@ -1428,6 +1429,11 @@ export const gptAccountService = {
 
   async syncAll(): Promise<SyncAllAccountsResponse> {
     const response = await api.post('/gpt-accounts/sync-all')
+    return response.data
+  },
+
+  async reorder(orderedIds: number[]): Promise<{ success: boolean }> {
+    const response = await api.put('/gpt-accounts/reorder', { orderedIds })
     return response.data
   },
 

@@ -268,14 +268,14 @@ router.post('/', apiKeyAuth, async (req, res) => {
       // 创建新账号，默认人数设置为1而不是0
       db.run(
         `INSERT INTO gpt_accounts
-         (email, token, refresh_token, user_count, chatgpt_account_id, oai_device_id, expire_at, is_open, is_demoted, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))`,
+         (email, token, refresh_token, user_count, chatgpt_account_id, oai_device_id, expire_at, sort_order, is_open, is_demoted, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM gpt_accounts), 1, ?, DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))`,
         [normalizedEmail, token, refreshToken || null, 1, chatgptAccountId || null, oaiDeviceId || null, expireAt, shouldUpdateIsDemoted ? isDemotedValue : 0]
       )
 
       // 获取新创建的账号
       const result = db.exec(`
-        SELECT id, email, token, refresh_token, user_count, chatgpt_account_id, oai_device_id, expire_at,
+        SELECT id, email, token, refresh_token, user_count, chatgpt_account_id, oai_device_id, expire_at, sort_order,
                COALESCE(is_demoted, 0) AS is_demoted,
                created_at, updated_at
         FROM gpt_accounts
@@ -292,9 +292,10 @@ router.post('/', apiKeyAuth, async (req, res) => {
         chatgptAccountId: row[5],
         oaiDeviceId: row[6],
         expireAt: row[7] || null,
-        isDemoted: Boolean(row[8]),
-        createdAt: row[9],
-        updatedAt: row[10]
+        sortOrder: row[8] ?? 0,
+        isDemoted: Boolean(row[9]),
+        createdAt: row[10],
+        updatedAt: row[11]
       }
 
       const { account: responseAccount, syncResult, removedUsers } = await syncAccountAndCleanup(account)

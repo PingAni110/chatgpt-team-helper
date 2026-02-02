@@ -1613,6 +1613,12 @@ export async function initDatabase() {
 	              console.log('已添加 expire_at 列到 gpt_accounts 表')
 	              saveDatabase()
 	            }
+            if (!columns.includes('sort_order')) {
+              database.run('ALTER TABLE gpt_accounts ADD COLUMN sort_order INTEGER DEFAULT 0')
+              database.run('UPDATE gpt_accounts SET sort_order = id WHERE sort_order IS NULL OR sort_order = 0')
+              console.log('已添加 sort_order 列到 gpt_accounts 表')
+              saveDatabase()
+            }
 
 	            if (!columns.includes('is_banned')) {
 	              database.run('ALTER TABLE gpt_accounts ADD COLUMN is_banned INTEGER DEFAULT 0')
@@ -1756,7 +1762,8 @@ export async function initDatabase() {
 	      invite_count INTEGER DEFAULT 0,
 	      chatgpt_account_id TEXT,
 	      oai_device_id TEXT,
-	      expire_at TEXT,
+      expire_at TEXT,
+      sort_order INTEGER DEFAULT 0,
 	      is_open INTEGER DEFAULT 0,
 	      is_demoted INTEGER DEFAULT 0,
 	      is_banned INTEGER DEFAULT 0,
@@ -1840,10 +1847,15 @@ export async function initDatabase() {
         console.log('已添加 is_demoted 列到 gpt_accounts 表')
       }
 
-	      if (!columns.includes('expire_at')) {
-	        database.run('ALTER TABLE gpt_accounts ADD COLUMN expire_at TEXT')
-	        console.log('已添加 expire_at 列到 gpt_accounts 表')
-	      }
+      if (!columns.includes('expire_at')) {
+        database.run('ALTER TABLE gpt_accounts ADD COLUMN expire_at TEXT')
+        console.log('已添加 expire_at 列到 gpt_accounts 表')
+      }
+      if (!columns.includes('sort_order')) {
+        database.run('ALTER TABLE gpt_accounts ADD COLUMN sort_order INTEGER DEFAULT 0')
+        database.run('UPDATE gpt_accounts SET sort_order = id WHERE sort_order IS NULL OR sort_order = 0')
+        console.log('已添加 sort_order 列到 gpt_accounts 表')
+      }
 
 	      if (!columns.includes('is_banned')) {
 	        database.run('ALTER TABLE gpt_accounts ADD COLUMN is_banned INTEGER DEFAULT 0')

@@ -123,18 +123,19 @@ function mapRowToAccount(row) {
     chatgptAccountId: row[6],
     oaiDeviceId: row[7],
     expireAt: row[8] || null,
-    isOpen: Boolean(row[9]),
-    isDemoted: Boolean(row[10]),
-    isBanned: Boolean(row[11]),
-    createdAt: row[12],
-    updatedAt: row[13]
+    sortOrder: row[9] ?? 0,
+    isOpen: Boolean(row[10]),
+    isDemoted: Boolean(row[11]),
+    isBanned: Boolean(row[12]),
+    createdAt: row[13],
+    updatedAt: row[14]
   }
 }
 
 async function fetchAccountById(db, accountId) {
   const result = db.exec(
     `
-    SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
+    SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, sort_order, is_open,
            COALESCE(is_demoted, 0) AS is_demoted,
            COALESCE(is_banned, 0) AS is_banned,
            created_at, updated_at
@@ -154,12 +155,12 @@ async function fetchAccountById(db, accountId) {
 export async function fetchAllAccounts() {
   const db = await getDatabase()
   const result = db.exec(`
-    SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
+    SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, sort_order, is_open,
            COALESCE(is_demoted, 0) AS is_demoted,
            COALESCE(is_banned, 0) AS is_banned,
            created_at, updated_at
     FROM gpt_accounts
-    ORDER BY created_at DESC
+    ORDER BY sort_order ASC, created_at DESC
   `)
 
   if (result.length === 0) {
