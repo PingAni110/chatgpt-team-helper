@@ -113,6 +113,44 @@ const resolveRequestProxy = (proxy) => {
 }
 
 function mapRowToAccount(row) {
+  const formatExpireAtOutput = (value) => {
+    if (value == null) return null
+    const raw = String(value).trim()
+    if (!raw) return null
+    if (/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)) return raw
+    const asNumber = Number(raw)
+    if (Number.isFinite(asNumber) && asNumber > 0) {
+      const ms = asNumber > 1e11 ? asNumber : asNumber * 1000
+      const date = new Date(ms)
+      if (!Number.isNaN(date.getTime())) {
+        return new Intl.DateTimeFormat('zh-CN', {
+          timeZone: 'Asia/Shanghai',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false
+        }).format(date).replace(/\//g, '/')
+      }
+    }
+    const parsed = new Date(raw)
+    if (!Number.isNaN(parsed.getTime())) {
+      return new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      }).format(parsed).replace(/\//g, '/')
+    }
+    return raw
+  }
+
   return {
     id: row[0],
     email: row[1],
@@ -122,7 +160,7 @@ function mapRowToAccount(row) {
     inviteCount: row[5],
     chatgptAccountId: row[6],
     oaiDeviceId: row[7],
-    expireAt: row[8] || null,
+    expireAt: formatExpireAtOutput(row[8]),
     sortOrder: row[9] ?? 0,
     isOpen: Boolean(row[10]),
     isDemoted: Boolean(row[11]),

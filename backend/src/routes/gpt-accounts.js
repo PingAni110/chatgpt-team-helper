@@ -47,6 +47,26 @@ const formatExpireAt = (date) => {
   }
 }
 
+const formatExpireAtOutput = (value) => {
+  if (value == null) return null
+  const raw = String(value).trim()
+  if (!raw) return null
+  if (EXPIRE_AT_REGEX.test(raw)) return raw
+  const asNumber = Number(raw)
+  if (Number.isFinite(asNumber) && asNumber > 0) {
+    const ms = asNumber > 1e11 ? asNumber : asNumber * 1000
+    const date = new Date(ms)
+    if (!Number.isNaN(date.getTime())) {
+      return formatExpireAt(date)
+    }
+  }
+  const parsed = new Date(raw)
+  if (!Number.isNaN(parsed.getTime())) {
+    return formatExpireAt(parsed)
+  }
+  return raw
+}
+
 const normalizeExpireAt = (value) => {
   if (value == null) return null
   const raw = String(value).trim()
@@ -222,7 +242,7 @@ router.get('/', async (req, res) => {
 	      inviteCount: row[5],
 	      chatgptAccountId: row[6],
 	      oaiDeviceId: row[7],
-	      expireAt: row[8] || null,
+	      expireAt: formatExpireAtOutput(row[8]),
 	      sortOrder: row[9] ?? 0,
 	      isOpen: Boolean(row[10]),
 	      isDemoted: Boolean(row[11]),
@@ -389,7 +409,7 @@ router.get('/:id', async (req, res) => {
 		      inviteCount: row[5],
 		      chatgptAccountId: row[6],
 		      oaiDeviceId: row[7],
-		      expireAt: row[8] || null,
+		      expireAt: formatExpireAtOutput(row[8]),
 		      sortOrder: row[9] ?? 0,
 		      isOpen: Boolean(row[10]),
 		      isDemoted: Boolean(row[11]),
@@ -477,7 +497,7 @@ router.post('/', async (req, res) => {
 		      inviteCount: row[5],
 		      chatgptAccountId: row[6],
 		      oaiDeviceId: row[7],
-		      expireAt: row[8] || null,
+		      expireAt: formatExpireAtOutput(row[8]),
 		      sortOrder: row[9] ?? 0,
 		      isOpen: Boolean(row[10]),
 		      isDemoted: Boolean(row[11]),
@@ -665,7 +685,7 @@ router.put('/:id', async (req, res) => {
 		      inviteCount: row[5],
 		      chatgptAccountId: row[6],
 		      oaiDeviceId: row[7],
-		      expireAt: row[8] || null,
+		      expireAt: formatExpireAtOutput(row[8]),
 		      sortOrder: row[9] ?? 0,
 		      isOpen: Boolean(row[10]),
 		      isDemoted: Boolean(row[11]),
@@ -728,7 +748,7 @@ router.patch('/:id/open', async (req, res) => {
 		      inviteCount: row[5],
 		      chatgptAccountId: row[6],
 		      oaiDeviceId: row[7],
-		      expireAt: row[8] || null,
+	      expireAt: formatExpireAtOutput(row[8]),
 		      sortOrder: row[9] ?? 0,
 		      isOpen: Boolean(row[10]),
 		      isDemoted: Boolean(row[11]),
@@ -792,7 +812,7 @@ router.patch('/:id/ban', async (req, res) => {
       inviteCount: row[5],
       chatgptAccountId: row[6],
       oaiDeviceId: row[7],
-      expireAt: row[8] || null,
+      expireAt: formatExpireAtOutput(row[8]),
       sortOrder: row[9] ?? 0,
       isOpen: Boolean(row[10]),
       isDemoted: Boolean(row[11]),
@@ -1014,7 +1034,7 @@ router.post('/:id/refresh-token', async (req, res) => {
 	      inviteCount: updatedRow[5],
 	      chatgptAccountId: updatedRow[6],
 	      oaiDeviceId: updatedRow[7],
-	      expireAt: updatedRow[8] || null,
+	      expireAt: formatExpireAtOutput(updatedRow[8]),
 	      sortOrder: updatedRow[9] ?? 0,
 	      isOpen: Boolean(updatedRow[10]),
 	      isDemoted: Boolean(updatedRow[11]),
