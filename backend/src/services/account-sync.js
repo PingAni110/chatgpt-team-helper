@@ -1,6 +1,7 @@
 import { getDatabase, saveDatabase } from '../database/init.js'
 import axios from 'axios'
 import { loadProxyList, parseProxyConfig } from '../utils/proxy.js'
+import { formatExpireAt, formatExpireAtOutput } from '../utils/expire-at.js'
 
 export class AccountSyncError extends Error {
   constructor(message, status = 500) {
@@ -13,26 +14,6 @@ export class AccountSyncError extends Error {
 const DEFAULT_PROXY_CACHE_TTL_MS = 60_000
 let defaultProxyCache = { loadedAt: 0, proxies: [] }
 let defaultProxyCursor = 0
-
-const formatExpireAt = (date) => {
-  const pad = (value) => String(value).padStart(2, '0')
-  try {
-    const parts = new Intl.DateTimeFormat('zh-CN', {
-      timeZone: 'Asia/Shanghai',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
-    }).formatToParts(date)
-    const get = (type) => parts.find(p => p.type === type)?.value || ''
-    return `${get('year')}/${get('month')}/${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`
-  } catch {
-    return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-  }
-}
 
 const decodeJwtPayload = (token) => {
   const raw = String(token || '').trim()
@@ -113,44 +94,6 @@ const resolveRequestProxy = (proxy) => {
 }
 
 function mapRowToAccount(row) {
-  const formatExpireAtOutput = (value) => {
-    if (value == null) return null
-    const raw = String(value).trim()
-    if (!raw) return null
-    if (/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)) return raw
-    const asNumber = Number(raw)
-    if (Number.isFinite(asNumber) && asNumber > 0) {
-      const ms = asNumber > 1e11 ? asNumber : asNumber * 1000
-      const date = new Date(ms)
-      if (!Number.isNaN(date.getTime())) {
-        return new Intl.DateTimeFormat('zh-CN', {
-          timeZone: 'Asia/Shanghai',
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          hour12: false
-        }).format(date).replace(/\//g, '/')
-      }
-    }
-    const parsed = new Date(raw)
-    if (!Number.isNaN(parsed.getTime())) {
-      return new Intl.DateTimeFormat('zh-CN', {
-        timeZone: 'Asia/Shanghai',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-      }).format(parsed).replace(/\//g, '/')
-    }
-    return raw
-  }
-
   return {
     id: row[0],
     email: row[1],
