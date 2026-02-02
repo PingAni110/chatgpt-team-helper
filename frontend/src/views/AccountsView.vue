@@ -80,7 +80,6 @@ const totalPages = computed(() => Math.max(1, Math.ceil(paginationMeta.value.tot
 // 同步相关状态
 const syncingAccountId = ref<number | null>(null)
 const syncingAll = ref(false)
-const autoExpireAtUpdate = ref(false)
 const expireAtManuallyEdited = ref(false)
 const draggingAccountId = ref<number | null>(null)
 const isReordering = ref(false)
@@ -135,32 +134,6 @@ const formatExpireAtDisplay = (expireAt?: string | null) => {
     return formatShanghaiDate(new Date(iso), { locale: appConfigStore.locale, timeZone: 'Asia/Shanghai' })
   }
   return formatShanghaiDate(raw, { locale: appConfigStore.locale, timeZone: 'Asia/Shanghai' })
-}
-
-const decodeJwtPayload = (token: string) => {
-  const raw = String(token || '').trim()
-  if (!raw) return null
-  const parts = raw.split('.')
-  if (parts.length < 2) return null
-  const payload = parts[1]
-  if (!payload) return null
-  try {
-    const padded = payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '=')
-    const decoded = atob(padded)
-    return JSON.parse(decoded)
-  } catch {
-    return null
-  }
-}
-
-const deriveExpireAtFromToken = (token: string) => {
-  const payload = decodeJwtPayload(token)
-  if (!payload || typeof payload !== 'object') return null
-  const exp = Number(payload.exp)
-  if (!Number.isFinite(exp) || exp <= 0) return null
-  const date = new Date(exp * 1000)
-  if (Number.isNaN(date.getTime())) return null
-  return formatDatetimeLocal(date)
 }
 
 // 转换存储格式 (YYYY/MM/DD HH:mm:ss) 为 datetime-local 格式 (YYYY-MM-DDTHH:mm:ss)
@@ -347,23 +320,7 @@ watch(searchQuery, () => {
 watch(
   () => formData.value.expireAt,
   () => {
-    if (autoExpireAtUpdate.value) {
-      autoExpireAtUpdate.value = false
-      return
-    }
     expireAtManuallyEdited.value = Boolean(formData.value.expireAt)
-  }
-)
-
-watch(
-  () => formData.value.token,
-  (token) => {
-    if (editingAccount.value) return
-    if (expireAtManuallyEdited.value) return
-    const derived = deriveExpireAtFromToken(token || '')
-    if (!derived) return
-    autoExpireAtUpdate.value = true
-    formData.value.expireAt = derived
   }
 )
 

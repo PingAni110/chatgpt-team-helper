@@ -62,32 +62,6 @@ const normalizeExpireAt = (value) => {
   return null
 }
 
-const decodeJwtPayload = (token) => {
-  const raw = String(token || '').trim()
-  if (!raw) return null
-  const parts = raw.split('.')
-  if (parts.length < 2) return null
-  const payload = parts[1]
-  if (!payload) return null
-  try {
-    const padded = payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '=')
-    const decoded = Buffer.from(padded, 'base64').toString('utf8')
-    return JSON.parse(decoded)
-  } catch {
-    return null
-  }
-}
-
-const deriveExpireAtFromToken = (token) => {
-  const payload = decodeJwtPayload(token)
-  if (!payload || typeof payload !== 'object') return null
-  const exp = Number(payload.exp)
-  if (!Number.isFinite(exp) || exp <= 0) return null
-  const date = new Date(exp * 1000)
-  if (Number.isNaN(date.getTime())) return null
-  return formatExpireAt(date)
-}
-
 // 生成随机兑换码的辅助函数
 function generateRedemptionCode(length = 12) {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // 排除容易混淆的字符
@@ -148,9 +122,8 @@ router.post('/', apiKeyAuth, async (req, res) => {
     const hasExpireAt = Object.prototype.hasOwnProperty.call(req.body || {}, 'expireAt')
     const expireAtInput = req.body?.expireAt
     const normalizedExpireAt = hasExpireAt ? normalizeExpireAt(expireAtInput) : null
-    const shouldUpdateExpireAt = hasExpireAt || Boolean(deriveExpireAtFromToken(token))
-    const derivedExpireAt = shouldUpdateExpireAt && !hasExpireAt ? deriveExpireAtFromToken(token) : null
-    const expireAt = hasExpireAt ? normalizedExpireAt : (derivedExpireAt || null)
+    const shouldUpdateExpireAt = hasExpireAt
+    const expireAt = hasExpireAt ? normalizedExpireAt : null
 
     const hasIsDemoted = Object.prototype.hasOwnProperty.call(body, 'isDemoted') || Object.prototype.hasOwnProperty.call(body, 'is_demoted')
     const isDemotedInput = Object.prototype.hasOwnProperty.call(body, 'isDemoted') ? body.isDemoted : body.is_demoted

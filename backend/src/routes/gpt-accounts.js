@@ -50,32 +50,6 @@ const normalizeExpireAt = (value) => {
   return null
 }
 
-const decodeJwtPayload = (token) => {
-  const raw = String(token || '').trim()
-  if (!raw) return null
-  const parts = raw.split('.')
-  if (parts.length < 2) return null
-  const payload = parts[1]
-  if (!payload) return null
-  try {
-    const padded = payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '=')
-    const decoded = Buffer.from(padded, 'base64').toString('utf8')
-    return JSON.parse(decoded)
-  } catch {
-    return null
-  }
-}
-
-const deriveExpireAtFromToken = (token) => {
-  const payload = decodeJwtPayload(token)
-  if (!payload || typeof payload !== 'object') return null
-  const exp = Number(payload.exp)
-  if (!Number.isFinite(exp) || exp <= 0) return null
-  const date = new Date(exp * 1000)
-  if (Number.isNaN(date.getTime())) return null
-  return formatExpireAt(date)
-}
-
 const collectEmails = (payload) => {
   if (!payload) return []
   if (Array.isArray(payload)) return payload
@@ -410,8 +384,7 @@ router.post('/', async (req, res) => {
     const normalizedOaiDeviceId = String(oaiDeviceId ?? '').trim()
     const hasExpireAt = Object.prototype.hasOwnProperty.call(body, 'expireAt')
     const normalizedExpireAt = hasExpireAt ? normalizeExpireAt(expireAt) : null
-    const derivedExpireAt = !hasExpireAt ? deriveExpireAtFromToken(token) : null
-    const finalExpireAt = hasExpireAt ? normalizedExpireAt : derivedExpireAt
+    const finalExpireAt = hasExpireAt ? normalizedExpireAt : null
 
     if (!email || !token || !normalizedChatgptAccountId) {
       return res.status(400).json({ error: 'Email, token and ChatGPT ID are required' })

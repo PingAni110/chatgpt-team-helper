@@ -1,7 +1,7 @@
 import { getDatabase, saveDatabase } from '../database/init.js'
 import axios from 'axios'
 import { loadProxyList, parseProxyConfig } from '../utils/proxy.js'
-import { formatExpireAt, formatExpireAtOutput } from '../utils/expire-at.js'
+import { formatExpireAtOutput } from '../utils/expire-at.js'
 
 export class AccountSyncError extends Error {
   constructor(message, status = 500) {
@@ -14,32 +14,6 @@ export class AccountSyncError extends Error {
 const DEFAULT_PROXY_CACHE_TTL_MS = 60_000
 let defaultProxyCache = { loadedAt: 0, proxies: [] }
 let defaultProxyCursor = 0
-
-const decodeJwtPayload = (token) => {
-  const raw = String(token || '').trim()
-  if (!raw) return null
-  const parts = raw.split('.')
-  if (parts.length < 2) return null
-  const payload = parts[1]
-  if (!payload) return null
-  try {
-    const padded = payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '=')
-    const decoded = Buffer.from(padded, 'base64').toString('utf8')
-    return JSON.parse(decoded)
-  } catch {
-    return null
-  }
-}
-
-const deriveExpireAtFromToken = (token) => {
-  const payload = decodeJwtPayload(token)
-  if (!payload || typeof payload !== 'object') return null
-  const exp = Number(payload.exp)
-  if (!Number.isFinite(exp) || exp <= 0) return null
-  const date = new Date(exp * 1000)
-  if (Number.isNaN(date.getTime())) return null
-  return formatExpireAt(date)
-}
 
 const getDefaultProxyList = () => {
   const now = Date.now()
@@ -646,18 +620,15 @@ export async function syncAccountUserCount(accountId, options = {}) {
   }
 
   const usersData = await requestAccountUsers(account, { ...(options.userListParams || {}), query: '' }, { proxy: options.proxy })
-  const derivedExpireAt = deriveExpireAtFromToken(account.token)
-  const shouldUpdateExpireAt = Boolean(derivedExpireAt)
 
   db.run(
     `
       UPDATE gpt_accounts
       SET user_count = ?,
-          expire_at = CASE WHEN ? = 1 THEN ? ELSE expire_at END,
           updated_at = DATETIME('now', 'localtime')
       WHERE id = ?
     `,
-    [usersData.total, shouldUpdateExpireAt ? 1 : 0, derivedExpireAt, account.id]
+    [usersData.total, account.id]
   )
 
   const fullUsersData = await fetchAllAccountUsers(account, { proxy: options.proxy })
