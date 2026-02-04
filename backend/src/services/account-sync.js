@@ -115,7 +115,7 @@ export async function fetchAllAccounts() {
            COALESCE(is_banned, 0) AS is_banned,
            created_at, updated_at
     FROM gpt_accounts
-    ORDER BY sort_order ASC, created_at DESC
+    ORDER BY sort_order ASC, created_at ASC
   `)
 
   if (result.length === 0) {

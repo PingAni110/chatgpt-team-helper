@@ -47,6 +47,11 @@ const normalizeExpireAt = (value) => {
     }
   }
 
+  const parsed = new Date(raw)
+  if (!Number.isNaN(parsed.getTime())) {
+    return formatExpireAt(parsed)
+  }
+
   return null
 }
 
@@ -162,7 +167,7 @@ router.get('/', async (req, res) => {
 	             created_at, updated_at
 	      FROM gpt_accounts
 	      ${whereClause}
-	      ORDER BY sort_order ASC, created_at DESC
+	      ORDER BY sort_order ASC, created_at ASC
 	      LIMIT ? OFFSET ?
 	    `, [...params, pageSize, offset])
 
@@ -235,7 +240,7 @@ router.post('/sync-all', async (req, res) => {
     const rows = db.exec(`
       SELECT id, email
       FROM gpt_accounts
-      ORDER BY sort_order ASC, created_at DESC
+      ORDER BY sort_order ASC, created_at ASC
     `)[0]?.values || []
 
     const results = []
@@ -402,7 +407,8 @@ router.post('/', async (req, res) => {
     const db = await getDatabase()
 
     // 设置默认人数为1而不是0
-    const finalUserCount = userCount !== undefined ? userCount : 1
+    const parsedUserCount = Number(userCount)
+    const finalUserCount = Number.isFinite(parsedUserCount) ? Math.max(1, parsedUserCount) : 1
 
     db.run(
       `INSERT INTO gpt_accounts (email, token, refresh_token, user_count, chatgpt_account_id, oai_device_id, expire_at, sort_order, is_demoted, is_banned, created_at, updated_at)
