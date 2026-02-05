@@ -204,6 +204,13 @@ const router = createRouter({
           component: PurchaseOrdersView,
           meta: { requiredMenuKey: 'purchase_orders', featureKey: 'payment' },
         },
+
+        {
+          path: 'product-management',
+          name: 'product-management',
+          component: PurchaseOrdersView,
+          meta: { requiredMenuKey: 'product_management', featureKey: 'payment' },
+        },
         {
           path: 'credit-orders',
           name: 'credit-orders',
