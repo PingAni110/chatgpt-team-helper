@@ -46,12 +46,20 @@ api.interceptors.request.use((config) => {
 
 export const authService = {
   async login(username: string, password: string) {
-    const response = await api.post('/auth/login', { username, password })
-    if (response.data.token) {
-      localStorage.setItem('token', response.data.token)
-      localStorage.setItem('user', JSON.stringify(response.data.user))
-      notifyAuthUpdated()
+    const payload = {
+      username: String(username || '').trim(),
+      password
     }
+    const response = await api.post('/auth/login', payload)
+    const token = String(response.data?.token || '').trim()
+    if (!token) {
+      throw new Error('登录成功但未返回 token')
+    }
+
+    localStorage.setItem('token', token)
+    localStorage.setItem('user', JSON.stringify(response.data.user || null))
+    notifyAuthUpdated()
+
     return response.data
   },
 
