@@ -1072,7 +1072,7 @@ const handleInviteSubmit = async () => {
       </div>
 
       <!-- Empty State -->
-      <div v-else-if="displayedAccounts.length === 0" class="flex flex-col items-center justify-center py-24 text-center">
+      <div v-else-if="accounts.length === 0 && activeSpaceTab === 'normal'" class="flex flex-col items-center justify-center py-24 text-center">
         <div class="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mb-4">
           <FolderOpen class="w-8 h-8 text-gray-400" />
         </div>
