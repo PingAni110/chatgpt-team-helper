@@ -190,6 +190,206 @@ const getPurchasePlan = (orderType) => {
   return plans.warranty
 }
 
+
+const PURCHASE_PRODUCTS_CONFIG_KEY = 'purchase_products'
+
+const parseFeatures = (input) => {
+  if (Array.isArray(input)) return input
+  if (typeof input === 'string') {
+    try {
+      const parsed = JSON.parse(input)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
+const normalizeFeatureItem = (item) => {
+  const text = String(item?.text ?? '').trim()
+  if (!text) return null
+  const type = String(item?.type ?? 'normal').trim().toLowerCase() === 'warn' ? 'warn' : 'normal'
+  return { type, text }
+}
+
+const buildDefaultManagedProducts = () => {
+  const { plans } = getPurchasePlans()
+  return [
+    {
+      id: 1,
+      orderType: ORDER_TYPE_WARRANTY,
+      title: plans.warranty.productName,
+      price: plans.warranty.amount,
+      durationDays: plans.warranty.serviceDays,
+      badge: '质保',
+      features: [
+        { type: 'normal', text: '支持退款 / 补号' },
+        { type: 'normal', text: '支付成功后系统自动处理' }
+      ],
+      description: '',
+      status: 'enabled',
+      isDeleted: false,
+      sortOrder: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    },
+    {
+      id: 2,
+      orderType: ORDER_TYPE_ANTI_BAN,
+      title: plans.antiBan.productName,
+      price: plans.antiBan.amount,
+      durationDays: plans.antiBan.serviceDays,
+      badge: '质保',
+      features: [
+        { type: 'normal', text: '支持退款 / 补号' },
+        { type: 'normal', text: '支付成功后系统自动处理' },
+        { type: 'warn', text: '经过特殊处理，无法退出工作空间，介意勿拍' }
+      ],
+      description: '',
+      status: 'enabled',
+      isDeleted: false,
+      sortOrder: 2,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    },
+    {
+      id: 3,
+      orderType: ORDER_TYPE_NO_WARRANTY,
+      title: plans.noWarranty.productName,
+      price: plans.noWarranty.amount,
+      durationDays: plans.noWarranty.serviceDays,
+      badge: '无质保',
+      features: [
+        { type: 'normal', text: '不支持退款 / 补号' },
+        { type: 'normal', text: '支付成功后系统自动处理' }
+      ],
+      description: '',
+      status: 'enabled',
+      isDeleted: false,
+      sortOrder: 3,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+  ]
+}
+
+const normalizeManagedProduct = (raw, fallbackId) => {
+  const id = Number(raw?.id)
+  const orderType = normalizeOrderType(raw?.orderType || raw?.order_type)
+  const title = String(raw?.title || raw?.productName || '').trim()
+  const price = formatMoney(raw?.price ?? raw?.amount ?? '0.00') || '0.00'
+  const durationDays = Math.max(1, toInt(raw?.durationDays ?? raw?.serviceDays, 30))
+  const badge = String(raw?.badge || '').trim() || (orderType === ORDER_TYPE_NO_WARRANTY ? '无质保' : '质保')
+  const features = parseFeatures(raw?.features).map(normalizeFeatureItem).filter(Boolean)
+  const description = String(raw?.description || '').trim()
+  const status = String(raw?.status || '').trim() === 'disabled' ? 'disabled' : 'enabled'
+  const isDeleted = Boolean(raw?.isDeleted || raw?.is_deleted)
+  const sortOrder = Math.max(0, toInt(raw?.sortOrder ?? raw?.sort_order, fallbackId))
+  const createdAt = raw?.createdAt || raw?.created_at || new Date().toISOString()
+  const updatedAt = raw?.updatedAt || raw?.updated_at || new Date().toISOString()
+
+  return {
+    id: Number.isFinite(id) && id > 0 ? id : fallbackId,
+    orderType,
+    title,
+    price,
+    durationDays,
+    badge,
+    features,
+    description,
+    status,
+    isDeleted,
+    sortOrder,
+    createdAt,
+    updatedAt
+  }
+}
+
+const loadManagedProducts = (db) => {
+  const row = db.exec('SELECT config_value FROM system_config WHERE config_key = ? LIMIT 1', [PURCHASE_PRODUCTS_CONFIG_KEY])
+  const raw = row?.[0]?.values?.[0]?.[0]
+  if (!raw) {
+    const defaults = buildDefaultManagedProducts()
+    db.run(
+      `INSERT INTO system_config (config_key, config_value, updated_at) VALUES (?, ?, DATETIME('now', 'localtime'))`,
+      [PURCHASE_PRODUCTS_CONFIG_KEY, JSON.stringify(defaults)]
+    )
+    saveDatabase()
+    return defaults
+  }
+
+  let parsed = []
+  try {
+    parsed = JSON.parse(String(raw))
+  } catch {
+    parsed = []
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    const defaults = buildDefaultManagedProducts()
+    db.run(
+      `UPDATE system_config SET config_value = ?, updated_at = DATETIME('now', 'localtime') WHERE config_key = ?`,
+      [JSON.stringify(defaults), PURCHASE_PRODUCTS_CONFIG_KEY]
+    )
+    saveDatabase()
+    return defaults
+  }
+
+  return parsed.map((item, index) => normalizeManagedProduct(item, index + 1))
+}
+
+const persistManagedProducts = (db, products) => {
+  const normalized = (products || []).map((item, index) => normalizeManagedProduct(item, index + 1))
+  const exists = db.exec('SELECT 1 FROM system_config WHERE config_key = ? LIMIT 1', [PURCHASE_PRODUCTS_CONFIG_KEY])
+  if (exists?.[0]?.values?.length) {
+    db.run(
+      `UPDATE system_config SET config_value = ?, updated_at = DATETIME('now', 'localtime') WHERE config_key = ?`,
+      [JSON.stringify(normalized), PURCHASE_PRODUCTS_CONFIG_KEY]
+    )
+  } else {
+    db.run(
+      `INSERT INTO system_config (config_key, config_value, updated_at) VALUES (?, ?, DATETIME('now', 'localtime'))`,
+      [PURCHASE_PRODUCTS_CONFIG_KEY, JSON.stringify(normalized)]
+    )
+  }
+  saveDatabase()
+  return normalized
+}
+
+const toPlanFromManagedProduct = (item, availableCount, antiBanAvailableCount) => ({
+  key: item.orderType,
+  productName: item.title,
+  amount: item.price,
+  serviceDays: item.durationDays,
+  availableCount: item.orderType === ORDER_TYPE_ANTI_BAN ? antiBanAvailableCount : availableCount,
+  buyerRewardPoints: item.orderType === ORDER_TYPE_NO_WARRANTY ? NO_WARRANTY_REWARD_POINTS : getPurchaseOrderRewardPoints(),
+  inviteRewardPoints: item.orderType === ORDER_TYPE_NO_WARRANTY ? NO_WARRANTY_REWARD_POINTS : getInviteOrderRewardPoints(),
+  badge: item.badge,
+  features: item.features,
+  description: item.description,
+  status: item.status,
+  sortOrder: item.sortOrder
+})
+
+const getManagedPurchasePlan = (db, orderType) => {
+  const products = loadManagedProducts(db)
+  const normalized = normalizeOrderType(orderType)
+  const active = products
+    .filter(item => !item.isDeleted && item.status === 'enabled')
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
+
+  const target = active.find(item => item.orderType === normalized)
+  if (!target) {
+    return getPurchasePlan(orderType)
+  }
+  return {
+    key: target.orderType,
+    productName: target.title,
+    amount: target.price,
+    serviceDays: target.durationDays
+  }
+}
+
 const isNoWarrantyOrderType = (orderType) => normalizeOrderType(orderType) === ORDER_TYPE_NO_WARRANTY
 const isAntiBanOrderType = (orderType) => normalizeOrderType(orderType) === ORDER_TYPE_ANTI_BAN
 
@@ -406,7 +606,7 @@ const getTodayAvailableCodeCount = (db) => {
         AND rc.account_email IS NOT NULL
         AND ga.is_open = 1
         AND COALESCE(ga.is_demoted, 0) = 0
-        AND ga.user_count < 6
+        AND ga.user_count < 5
         AND DATE(ga.created_at) = DATE('now', 'localtime')
         AND (rc.reserved_for_order_no IS NULL OR rc.reserved_for_order_no = '')
         AND (rc.reserved_for_entry_id IS NULL OR rc.reserved_for_entry_id = 0)
@@ -426,7 +626,7 @@ const reserveTodayCode = (db, { orderNo, email }) => {
         AND rc.account_email IS NOT NULL
         AND ga.is_open = 1
         AND COALESCE(ga.is_demoted, 0) = 0
-        AND ga.user_count < 6
+        AND ga.user_count < 5
         AND DATE(ga.created_at) = DATE('now', 'localtime')
         AND (rc.reserved_for_order_no IS NULL OR rc.reserved_for_order_no = '')
         AND (rc.reserved_for_entry_id IS NULL OR rc.reserved_for_entry_id = 0)
@@ -1037,7 +1237,7 @@ const getDemotedAvailableCodeCount = (db) => {
         AND rc.account_email IS NOT NULL
         AND ga.is_open = 1
         AND COALESCE(ga.is_demoted, 0) = 1
-        AND ga.user_count < 6
+        AND ga.user_count < 5
         AND DATE(ga.created_at) = DATE('now', 'localtime')
         AND (rc.reserved_for_order_no IS NULL OR rc.reserved_for_order_no = '')
         AND (rc.reserved_for_entry_id IS NULL OR rc.reserved_for_entry_id = 0)
@@ -1057,7 +1257,7 @@ const reserveDemotedCode = (db, { orderNo, email }) => {
         AND rc.account_email IS NOT NULL
         AND ga.is_open = 1
         AND COALESCE(ga.is_demoted, 0) = 1
-        AND ga.user_count < 6
+        AND ga.user_count < 5
         AND DATE(ga.created_at) = DATE('now', 'localtime')
         AND (rc.reserved_for_order_no IS NULL OR rc.reserved_for_order_no = '')
         AND (rc.reserved_for_entry_id IS NULL OR rc.reserved_for_entry_id = 0)
@@ -1088,7 +1288,7 @@ const reserveDemotedCode = (db, { orderNo, email }) => {
 
 router.get('/meta', async (req, res) => {
   try {
-    const { plans, expireMinutes } = getPurchasePlans()
+    const { plans: fallbackPlans, expireMinutes } = getPurchasePlans()
     const db = await getDatabase()
     await withLocks(['purchase'], async () => {
       const released = cleanupExpiredOrders(db, { expireMinutes })
@@ -1096,46 +1296,218 @@ router.get('/meta', async (req, res) => {
         saveDatabase()
       }
     })
+
     const availableCount = getTodayAvailableCodeCount(db)
     const antiBanAvailableCount = getDemotedAvailableCodeCount(db)
-    const responsePlans = [
-      {
-        key: ORDER_TYPE_WARRANTY,
-        productName: plans.warranty.productName,
-        amount: plans.warranty.amount,
-        serviceDays: plans.warranty.serviceDays,
-        availableCount,
-        buyerRewardPoints: getPurchaseOrderRewardPoints(),
-        inviteRewardPoints: getInviteOrderRewardPoints()
-      },
-      {
-        key: ORDER_TYPE_NO_WARRANTY,
-        productName: plans.noWarranty.productName,
-        amount: plans.noWarranty.amount,
-        serviceDays: plans.noWarranty.serviceDays,
-        availableCount,
-        buyerRewardPoints: NO_WARRANTY_REWARD_POINTS,
-        inviteRewardPoints: NO_WARRANTY_REWARD_POINTS
-      },
-      {
-        key: ORDER_TYPE_ANTI_BAN,
-        productName: plans.antiBan.productName,
-        amount: plans.antiBan.amount,
-        serviceDays: plans.antiBan.serviceDays,
-        availableCount: antiBanAvailableCount,
-        buyerRewardPoints: getPurchaseOrderRewardPoints(),
-        inviteRewardPoints: getInviteOrderRewardPoints()
-      }
-    ]
-    res.json({
+    const managedProducts = loadManagedProducts(db)
+      .filter(item => !item.isDeleted && item.status === 'enabled')
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
+
+    const responsePlans = managedProducts
+      .map(item => toPlanFromManagedProduct(item, availableCount, antiBanAvailableCount))
+      .filter(item => ORDER_TYPE_SET.has(String(item.key || '')))
+
+    if (!responsePlans.length) {
+      return res.json({
+        plans: [
+          {
+            key: ORDER_TYPE_WARRANTY,
+            productName: fallbackPlans.warranty.productName,
+            amount: fallbackPlans.warranty.amount,
+            serviceDays: fallbackPlans.warranty.serviceDays,
+            availableCount,
+            buyerRewardPoints: getPurchaseOrderRewardPoints(),
+            inviteRewardPoints: getInviteOrderRewardPoints(),
+            badge: '质保',
+            features: [
+              { type: 'normal', text: '支持退款 / 补号' },
+              { type: 'normal', text: '支付成功后系统自动处理' }
+            ],
+            description: '',
+            status: 'enabled',
+            sortOrder: 1
+          }
+        ],
+        productName: fallbackPlans.warranty.productName,
+        amount: fallbackPlans.warranty.amount,
+        serviceDays: fallbackPlans.warranty.serviceDays,
+        availableCount
+      })
+    }
+
+    const first = responsePlans[0]
+    return res.json({
       plans: responsePlans,
-      productName: plans.warranty.productName,
-      amount: plans.warranty.amount,
-      serviceDays: plans.warranty.serviceDays,
-      availableCount
+      productName: first.productName,
+      amount: first.amount,
+      serviceDays: first.serviceDays,
+      availableCount: first.availableCount
     })
   } catch (error) {
     console.error('[Purchase] meta error:', error)
+    res.status(500).json({ error: '内部服务器错误' })
+  }
+})
+
+
+// 商品管理（后台）
+router.get('/admin/products', authenticateToken, requireMenu('product_management'), async (req, res) => {
+  try {
+    const db = await getDatabase()
+    const page = Math.max(1, Number(req.query.page) || 1)
+    const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20))
+    const search = String(req.query.search || '').trim().toLowerCase()
+    const status = String(req.query.status || 'all').trim().toLowerCase()
+
+    let items = loadManagedProducts(db)
+    if (search) {
+      items = items.filter(item => String(item.title || '').toLowerCase().includes(search))
+    }
+    if (status === 'enabled' || status === 'disabled') {
+      items = items.filter(item => item.status === status)
+    }
+
+    items = items.filter(item => !item.isDeleted).sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
+
+    const total = items.length
+    const offset = (page - 1) * pageSize
+    const paged = items.slice(offset, offset + pageSize)
+
+    res.json({ items: paged, pagination: { page, pageSize, total } })
+  } catch (error) {
+    console.error('[Purchase] admin products list error:', error)
+    res.status(500).json({ error: '内部服务器错误' })
+  }
+})
+
+router.post('/admin/products', authenticateToken, requireMenu('product_management'), async (req, res) => {
+  try {
+    const db = await getDatabase()
+    const now = new Date().toISOString()
+    const list = loadManagedProducts(db)
+    const nextId = list.length ? Math.max(...list.map(item => Number(item.id) || 0)) + 1 : 1
+
+    const title = String(req.body?.title || '').trim()
+    const price = formatMoney(req.body?.price)
+    const durationDays = Math.max(1, toInt(req.body?.durationDays, 30))
+    const orderType = normalizeOrderType(req.body?.orderType)
+    const badge = String(req.body?.badge || '').trim() || (orderType === ORDER_TYPE_NO_WARRANTY ? '无质保' : '质保')
+    const features = parseFeatures(req.body?.features).map(normalizeFeatureItem).filter(Boolean)
+    const description = String(req.body?.description || '').trim()
+    const status = String(req.body?.status || '').trim() === 'disabled' ? 'disabled' : 'enabled'
+    const sortOrder = Math.max(0, toInt(req.body?.sortOrder, nextId))
+
+    if (!title) return res.status(400).json({ error: '商品名称不能为空' })
+    if (!price || Number(price) < 0) return res.status(400).json({ error: '价格必须为非负数' })
+
+    const item = normalizeManagedProduct({ id: nextId, title, price, durationDays, orderType, badge, features, description, status, sortOrder, createdAt: now, updatedAt: now }, nextId)
+    const saved = persistManagedProducts(db, [...list, item])
+    const created = saved.find(x => Number(x.id) === item.id) || item
+
+    res.status(201).json({ item: created })
+  } catch (error) {
+    console.error('[Purchase] admin products create error:', error)
+    res.status(500).json({ error: '内部服务器错误' })
+  }
+})
+
+router.put('/admin/products/:id', authenticateToken, requireMenu('product_management'), async (req, res) => {
+  try {
+    const db = await getDatabase()
+    const id = Number(req.params.id)
+    if (!Number.isFinite(id)) return res.status(400).json({ error: '无效的商品ID' })
+
+    const list = loadManagedProducts(db)
+    const index = list.findIndex(item => Number(item.id) === id)
+    if (index < 0) return res.status(404).json({ error: '商品不存在' })
+
+    const current = list[index]
+    const title = String((req.body?.title ?? current.title) || '').trim()
+    const price = formatMoney(req.body?.price ?? current.price)
+    const durationDays = Math.max(1, toInt(req.body?.durationDays ?? current.durationDays, 30))
+    const orderType = normalizeOrderType(req.body?.orderType ?? current.orderType)
+    const badge = String((req.body?.badge ?? current.badge) || '').trim() || (orderType === ORDER_TYPE_NO_WARRANTY ? '无质保' : '质保')
+    const features = parseFeatures(req.body?.features ?? current.features).map(normalizeFeatureItem).filter(Boolean)
+    const description = String((req.body?.description ?? current.description) || '').trim()
+    const status = String((req.body?.status ?? current.status) || '').trim() === 'disabled' ? 'disabled' : 'enabled'
+    const sortOrder = Math.max(0, toInt(req.body?.sortOrder ?? current.sortOrder, current.sortOrder || id))
+
+    if (!title) return res.status(400).json({ error: '商品名称不能为空' })
+    if (!price || Number(price) < 0) return res.status(400).json({ error: '价格必须为非负数' })
+
+    list[index] = normalizeManagedProduct({ ...current, title, price, durationDays, orderType, badge, features, description, status, sortOrder, updatedAt: new Date().toISOString() }, id)
+    const saved = persistManagedProducts(db, list)
+    res.json({ item: saved.find(item => Number(item.id) === id) || list[index] })
+  } catch (error) {
+    console.error('[Purchase] admin products update error:', error)
+    res.status(500).json({ error: '内部服务器错误' })
+  }
+})
+
+router.patch('/admin/products/:id/status', authenticateToken, requireMenu('product_management'), async (req, res) => {
+  try {
+    const db = await getDatabase()
+    const id = Number(req.params.id)
+    const list = loadManagedProducts(db)
+    const index = list.findIndex(item => Number(item.id) === id)
+    if (index < 0) return res.status(404).json({ error: '商品不存在' })
+    const nextStatus = String(req.body?.status || '').trim() === 'disabled' ? 'disabled' : 'enabled'
+    list[index] = normalizeManagedProduct({ ...list[index], status: nextStatus, updatedAt: new Date().toISOString() }, id)
+    const saved = persistManagedProducts(db, list)
+    res.json({ item: saved.find(item => Number(item.id) === id) || list[index] })
+  } catch (error) {
+    console.error('[Purchase] admin products status error:', error)
+    res.status(500).json({ error: '内部服务器错误' })
+  }
+})
+
+router.patch('/admin/products/reorder', authenticateToken, requireMenu('product_management'), async (req, res) => {
+  try {
+    const db = await getDatabase()
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(v => Number(v)).filter(Number.isFinite) : []
+    if (!ids.length) return res.status(400).json({ error: 'ids 不能为空' })
+    const list = loadManagedProducts(db)
+    const map = new Map(list.map(item => [Number(item.id), item]))
+    const next = []
+    ids.forEach((id, index) => {
+      const current = map.get(id)
+      if (!current) return
+      next.push(normalizeManagedProduct({ ...current, sortOrder: index + 1, updatedAt: new Date().toISOString() }, id))
+      map.delete(id)
+    })
+    for (const item of map.values()) {
+      next.push(item)
+    }
+    const saved = persistManagedProducts(db, next)
+    res.json({ items: saved.filter(item => !item.isDeleted).sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id) })
+  } catch (error) {
+    console.error('[Purchase] admin products reorder error:', error)
+    res.status(500).json({ error: '内部服务器错误' })
+  }
+})
+
+router.delete('/admin/products/:id', authenticateToken, requireMenu('product_management'), async (req, res) => {
+  try {
+    const db = await getDatabase()
+    const id = Number(req.params.id)
+    const list = loadManagedProducts(db)
+    const index = list.findIndex(item => Number(item.id) === id)
+    if (index < 0) return res.status(404).json({ error: '商品不存在' })
+
+    const current = list[index]
+    const hasOrders = db.exec('SELECT 1 FROM purchase_orders WHERE order_type = ? LIMIT 1', [current.orderType])[0]?.values?.length > 0
+
+    list[index] = normalizeManagedProduct({
+      ...current,
+      status: 'disabled',
+      isDeleted: true,
+      updatedAt: new Date().toISOString()
+    }, id)
+
+    persistManagedProducts(db, list)
+    res.json({ message: hasOrders ? '商品已下架并软删除（存在历史订单）' : '商品已删除' })
+  } catch (error) {
+    console.error('[Purchase] admin products delete error:', error)
     res.status(500).json({ error: '内部服务器错误' })
   }
 })
@@ -1157,14 +1529,15 @@ router.post('/orders', async (req, res) => {
   }
 
   const purchasePlans = getPurchasePlans()
-  const purchasePlan = getPurchasePlan(orderType)
   const orderNo = generateOrderNo()
 
   try {
     const db = await getDatabase()
 
+    let purchasePlan = null
     const reservation = await withLocks(['purchase'], async () => {
       cleanupExpiredOrders(db, { expireMinutes: purchasePlans.expireMinutes })
+      purchasePlan = getManagedPurchasePlan(db, orderType)
 
       const antiBan = isAntiBanOrderType(orderType)
       const availableCount = antiBan ? getDemotedAvailableCodeCount(db) : getTodayAvailableCodeCount(db)
@@ -1207,6 +1580,9 @@ router.post('/orders', async (req, res) => {
 
     if (!reservation.ok) {
       return res.status(409).json({ error: reservation.error })
+    }
+    if (!purchasePlan) {
+      return res.status(500).json({ error: '商品配置异常，请联系管理员' })
     }
 
     // ZPAY 异步通知为 GET，会把支付结果参数拼在 notify_url 后面（示例：/notify?pid=...&trade_no=...）

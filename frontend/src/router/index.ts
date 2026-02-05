@@ -22,6 +22,7 @@ import WaitingRoomAdminView from '../views/WaitingRoomAdminView.vue'
 import XhsOrdersView from '../views/XhsOrdersView.vue'
 import XianyuOrdersView from '../views/XianyuOrdersView.vue'
 import PurchaseOrdersView from '../views/PurchaseOrdersView.vue'
+import ProductManagementView from '../views/ProductManagementView.vue'
 import CreditOrdersView from '../views/CreditOrdersView.vue'
 import AccountRecoveryAdminView from '../views/AccountRecoveryAdminView.vue'
 import StatsView from '../views/StatsView.vue'
@@ -208,7 +209,7 @@ const router = createRouter({
         {
           path: 'product-management',
           name: 'product-management',
-          component: PurchaseOrdersView,
+          component: ProductManagementView,
           meta: { requiredMenuKeys: ['product_management', 'purchase_orders'], featureKey: 'payment' },
         },
         {
