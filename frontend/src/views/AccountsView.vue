@@ -534,6 +534,13 @@ const loadAccounts = async () => {
 }
 
 // 搜索处理
+const handleSpaceTabChange = async (tab: 'normal' | 'abnormal') => {
+  if (activeSpaceTab.value === tab) return
+  activeSpaceTab.value = tab
+  paginationMeta.value.page = 1
+  await loadAccounts()
+}
+
 const handleSearch = () => {
   paginationMeta.value.page = 1
   if (searchDebounceTimer) {
@@ -1074,12 +1081,16 @@ const handleInviteSubmit = async () => {
       <div v-else>
         <div class="px-6 pt-5">
           <div class="inline-flex rounded-xl bg-gray-100 p-1 text-sm">
-            <button class="px-4 py-1.5 rounded-lg" :class="activeSpaceTab === 'normal' ? 'bg-white shadow text-gray-900' : 'text-gray-500'" @click="activeSpaceTab='normal'">正常空间</button>
-            <button class="px-4 py-1.5 rounded-lg" :class="activeSpaceTab === 'abnormal' ? 'bg-white shadow text-gray-900' : 'text-gray-500'" @click="activeSpaceTab='abnormal'">异常空间</button>
+            <button class="px-4 py-1.5 rounded-lg" :class="activeSpaceTab === 'normal' ? 'bg-white shadow text-gray-900' : 'text-gray-500'" @click="handleSpaceTabChange('normal')">正常空间</button>
+            <button class="px-4 py-1.5 rounded-lg" :class="activeSpaceTab === 'abnormal' ? 'bg-white shadow text-gray-900' : 'text-gray-500'" @click="handleSpaceTabChange('abnormal')">异常空间</button>
           </div>
         </div>
+        <div v-if="displayedAccounts.length === 0" class="px-6 py-12 text-center text-gray-500">
+          当前筛选下暂无账号，请切换标签查看。
+        </div>
+
         <!-- Desktop Table -->
-        <div class="hidden md:block overflow-x-auto">
+        <div v-else class="hidden md:block overflow-x-auto">
           <table class="w-full">
             <thead>
               <tr class="border-b border-gray-100 bg-gray-50/50">
