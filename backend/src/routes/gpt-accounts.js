@@ -71,6 +71,25 @@ const normalizeExpireAt = (value) => {
   return null
 }
 
+const normalizeShanghaiDateTime = (value) => {
+  const normalized = normalizeExpireAt(value)
+  if (normalized) return normalized
+  return null
+}
+
+const resolveSpaceStatus = (account) => {
+  if (Boolean(account?.isBanned)) {
+    return { code: 'abnormal', reason: '账号被封' }
+  }
+
+  const token = String(account?.token || '').trim()
+  if (!token) {
+    return { code: 'abnormal', reason: 'Token 失效' }
+  }
+
+  return { code: 'normal', reason: '正常' }
+}
+
 const collectEmails = (payload) => {
   if (!payload) return []
   if (Array.isArray(payload)) return payload
@@ -202,10 +221,11 @@ router.get('/', async (req, res) => {
 	      SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
 	             COALESCE(is_demoted, 0) AS is_demoted,
 	             COALESCE(is_banned, 0) AS is_banned,
+	             COALESCE(sort_order, id) AS sort_order,
 	             created_at, updated_at
 	      FROM gpt_accounts
 	      ${whereClause}
-	      ORDER BY created_at DESC
+	      ORDER BY COALESCE(sort_order, id) ASC, created_at DESC
 	      LIMIT ? OFFSET ?
 	    `, [...params, pageSize, offset])
 
@@ -222,8 +242,10 @@ router.get('/', async (req, res) => {
 	      isOpen: Boolean(row[9]),
 	      isDemoted: Boolean(row[10]),
 	      isBanned: Boolean(row[11]),
-	      createdAt: row[12],
-	      updatedAt: row[13]
+	      sortOrder: Number(row[12] || 0),
+	      createdAt: row[13],
+	      updatedAt: row[14],
+	      spaceStatus: resolveSpaceStatus({ isBanned: Boolean(row[11]), token: row[2] })
 	    }))
 
     res.json({
@@ -302,7 +324,7 @@ router.post('/', async (req, res) => {
 
     const normalizedChatgptAccountId = String(chatgptAccountId ?? '').trim()
     const normalizedOaiDeviceId = String(oaiDeviceId ?? '').trim()
-    const normalizedExpireAt = normalizeExpireAt(expireAt)
+    const normalizedExpireAt = normalizeShanghaiDateTime(expireAt)
 
     if (!email || !token || !normalizedChatgptAccountId) {
       return res.status(400).json({ error: 'Email, token and ChatGPT ID are required' })
@@ -644,6 +666,7 @@ router.patch('/:id/ban', async (req, res) => {
         SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
                COALESCE(is_demoted, 0) AS is_demoted,
                COALESCE(is_banned, 0) AS is_banned,
+               COALESCE(sort_order, id) AS sort_order,
                created_at, updated_at
         FROM gpt_accounts
         WHERE id = ?
@@ -664,14 +687,73 @@ router.patch('/:id/ban', async (req, res) => {
       isOpen: Boolean(row[9]),
       isDemoted: Boolean(row[10]),
       isBanned: Boolean(row[11]),
-      createdAt: row[12],
-      updatedAt: row[13]
+      sortOrder: Number(row[12] || 0),
+      createdAt: row[13],
+      updatedAt: row[14],
+      spaceStatus: resolveSpaceStatus({ isBanned: Boolean(row[11]), token: row[2] })
     }
 
     res.json(account)
   } catch (error) {
     console.error('Ban GPT account error:', error)
     res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+
+// 更新账号排序
+router.patch('/reorder', async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(v => Number(v)).filter(Number.isFinite) : []
+    if (!ids.length) return res.status(400).json({ error: 'ids is required' })
+
+    const db = await getDatabase()
+    const placeholders = ids.map(() => '?').join(',')
+    const existing = db.exec(`SELECT id FROM gpt_accounts WHERE id IN (${placeholders})`, ids)
+    const existingSet = new Set((existing[0]?.values || []).map(row => Number(row[0])))
+    for (const id of ids) {
+      if (!existingSet.has(id)) return res.status(400).json({ error: `账号不存在: ${id}` })
+    }
+
+    ids.forEach((id, index) => {
+      db.run(
+        `UPDATE gpt_accounts SET sort_order = ?, updated_at = DATETIME('now', 'localtime') WHERE id = ?`,
+        [index + 1, id]
+      )
+    })
+    saveDatabase()
+    return res.json({ message: '排序更新成功' })
+  } catch (error) {
+    console.error('更新账号排序失败:', error)
+    return res.status(500).json({ error: '内部服务器错误' })
+  }
+})
+
+// 一键同步全部空间信息
+router.post('/sync-all', async (req, res) => {
+  try {
+    const db = await getDatabase()
+    const rows = db.exec(`SELECT id FROM gpt_accounts ORDER BY COALESCE(sort_order, id) ASC, created_at DESC`)
+    const ids = (rows[0]?.values || []).map(row => Number(row[0])).filter(Number.isFinite)
+
+    const results = []
+    for (const accountId of ids) {
+      try {
+        const userSync = await syncAccountUserCount(accountId)
+        const inviteSync = await syncAccountInviteCount(accountId, {
+          accountRecord: userSync.account,
+          inviteListParams: { offset: 0, limit: 1, query: '' }
+        })
+        results.push({ id: accountId, ok: true, account: inviteSync.account, syncedUserCount: userSync.syncedUserCount, inviteCount: inviteSync.inviteCount })
+      } catch (error) {
+        results.push({ id: accountId, ok: false, error: error?.message || '同步失败' })
+      }
+    }
+
+    return res.json({ message: '批量同步完成', total: ids.length, results })
+  } catch (error) {
+    console.error('批量同步失败:', error)
+    return res.status(500).json({ error: '内部服务器错误' })
   }
 })
 
