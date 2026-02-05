@@ -1709,6 +1709,7 @@ export async function initDatabase() {
 	      is_demoted INTEGER DEFAULT 0,
 	      is_banned INTEGER DEFAULT 0,
 	      ban_processed INTEGER DEFAULT 0,
+	      sort_order INTEGER DEFAULT 0,
 	      created_at DATETIME DEFAULT (DATETIME('now', 'localtime')),
 	      updated_at DATETIME DEFAULT (DATETIME('now', 'localtime'))
 	    )
@@ -1800,6 +1801,17 @@ export async function initDatabase() {
 	        database.run('ALTER TABLE gpt_accounts ADD COLUMN ban_processed INTEGER DEFAULT 0')
 	        console.log('已添加 ban_processed 列到 gpt_accounts 表')
 	      }
+
+	      if (!columns.includes('sort_order')) {
+	        database.run('ALTER TABLE gpt_accounts ADD COLUMN sort_order INTEGER DEFAULT 0')
+	        console.log('已添加 sort_order 列到 gpt_accounts 表')
+	      }
+
+	      database.run(`
+	        UPDATE gpt_accounts
+	        SET sort_order = id
+	        WHERE COALESCE(sort_order, 0) = 0
+	      `)
 	    }
 	  } catch (err) {
 	    console.log('列检查/添加已跳过:', err.message)

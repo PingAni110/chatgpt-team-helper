@@ -5,6 +5,7 @@ import { authenticateToken } from '../middleware/auth.js'
 import { apiKeyAuth } from '../middleware/api-key-auth.js'
 import { requireMenu } from '../middleware/rbac.js'
 import { syncAccountUserCount, syncAccountInviteCount, fetchOpenAiAccountInfo, AccountSyncError, deleteAccountUser, inviteAccountUser, deleteAccountInvite } from '../services/account-sync.js'
+import { SPACE_MEMBER_LIMIT, calcRedeemableSlots, normalizeMemberCount } from '../utils/space-capacity.js'
 
 const router = express.Router()
 const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
@@ -69,6 +70,25 @@ const normalizeExpireAt = (value) => {
   }
 
   return null
+}
+
+const normalizeShanghaiDateTime = (value) => {
+  const normalized = normalizeExpireAt(value)
+  if (normalized) return normalized
+  return null
+}
+
+const resolveSpaceStatus = (account) => {
+  if (Boolean(account?.isBanned)) {
+    return { code: 'abnormal', reason: '账号被封' }
+  }
+
+  const token = String(account?.token || '').trim()
+  if (!token) {
+    return { code: 'abnormal', reason: 'Token 失效' }
+  }
+
+  return { code: 'normal', reason: '正常' }
 }
 
 const collectEmails = (payload) => {
@@ -202,10 +222,11 @@ router.get('/', async (req, res) => {
 	      SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
 	             COALESCE(is_demoted, 0) AS is_demoted,
 	             COALESCE(is_banned, 0) AS is_banned,
+	             COALESCE(sort_order, id) AS sort_order,
 	             created_at, updated_at
 	      FROM gpt_accounts
 	      ${whereClause}
-	      ORDER BY created_at DESC
+	      ORDER BY COALESCE(sort_order, id) ASC, created_at DESC
 	      LIMIT ? OFFSET ?
 	    `, [...params, pageSize, offset])
 
@@ -222,8 +243,10 @@ router.get('/', async (req, res) => {
 	      isOpen: Boolean(row[9]),
 	      isDemoted: Boolean(row[10]),
 	      isBanned: Boolean(row[11]),
-	      createdAt: row[12],
-	      updatedAt: row[13]
+	      sortOrder: Number(row[12] || 0),
+	      createdAt: row[13],
+	      updatedAt: row[14],
+	      spaceStatus: resolveSpaceStatus({ isBanned: Boolean(row[11]), token: row[2] })
 	    }))
 
     res.json({
@@ -302,7 +325,7 @@ router.post('/', async (req, res) => {
 
     const normalizedChatgptAccountId = String(chatgptAccountId ?? '').trim()
     const normalizedOaiDeviceId = String(oaiDeviceId ?? '').trim()
-    const normalizedExpireAt = normalizeExpireAt(expireAt)
+    const normalizedExpireAt = normalizeShanghaiDateTime(expireAt)
 
     if (!email || !token || !normalizedChatgptAccountId) {
       return res.status(400).json({ error: 'Email, token and ChatGPT ID are required' })
@@ -319,8 +342,11 @@ router.post('/', async (req, res) => {
 
     const db = await getDatabase()
 
-    // 设置默认人数为1而不是0
-    const finalUserCount = userCount !== undefined ? userCount : 1
+    // 账号初始人数默认 1；空间固定上限 5 人
+    const finalUserCount = normalizeMemberCount(userCount !== undefined ? userCount : 1)
+    if (finalUserCount > SPACE_MEMBER_LIMIT) {
+      return res.status(400).json({ error: `空间人数不能超过 ${SPACE_MEMBER_LIMIT} 人` })
+    }
 
     db.run(
       `INSERT INTO gpt_accounts (email, token, refresh_token, user_count, chatgpt_account_id, oai_device_id, expire_at, is_demoted, is_banned, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))`,
@@ -368,11 +394,9 @@ router.post('/', async (req, res) => {
       return code
     }
 
-    // 自动生成兑换码并绑定到该账号
-    // Team 账号默认总容量 5，新建账号默认人数按 1 计算，所以默认生成 4 个兑换码
-    const totalCapacity = 5
-    const currentUserCountForCodes = Math.max(1, Number(finalUserCount) || 1)
-    const codesToGenerate = Math.max(0, totalCapacity - currentUserCountForCodes)
+    // 自动生成兑换码并绑定到该账号。
+    // 策略：人数已满(>=5)时不生成兑换码，与现有“满员不可继续上车/不可继续发码”的逻辑保持一致。
+    const codesToGenerate = calcRedeemableSlots(finalUserCount, SPACE_MEMBER_LIMIT)
 
     const generatedCodes = []
     for (let i = 0; i < codesToGenerate; i++) {
@@ -415,7 +439,7 @@ router.post('/', async (req, res) => {
     res.status(201).json({
       account,
       generatedCodes: codes,
-      message: `账号创建成功，已自动生成${codes.length}个兑换码`
+      message: `账号创建成功，已自动生成${generatedCodes.length}个兑换码`
     })
   } catch (error) {
     console.error('Create GPT account error:', error)
@@ -474,6 +498,11 @@ router.put('/:id', async (req, res) => {
 
     const existingEmail = checkResult[0].values[0][1]
 
+    const normalizedUserCount = normalizeMemberCount(userCount)
+    if (normalizedUserCount > SPACE_MEMBER_LIMIT) {
+      return res.status(400).json({ error: `空间人数不能超过 ${SPACE_MEMBER_LIMIT} 人` })
+    }
+
     db.run(
       `UPDATE gpt_accounts
        SET email = ?,
@@ -493,7 +522,7 @@ router.put('/:id', async (req, res) => {
         email,
         token,
         refreshToken || null,
-        userCount || 0,
+        normalizedUserCount,
         normalizedChatgptAccountId,
         normalizedOaiDeviceId || null,
         hasExpireAt ? 1 : 0,
@@ -644,6 +673,7 @@ router.patch('/:id/ban', async (req, res) => {
         SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
                COALESCE(is_demoted, 0) AS is_demoted,
                COALESCE(is_banned, 0) AS is_banned,
+               COALESCE(sort_order, id) AS sort_order,
                created_at, updated_at
         FROM gpt_accounts
         WHERE id = ?
@@ -664,14 +694,73 @@ router.patch('/:id/ban', async (req, res) => {
       isOpen: Boolean(row[9]),
       isDemoted: Boolean(row[10]),
       isBanned: Boolean(row[11]),
-      createdAt: row[12],
-      updatedAt: row[13]
+      sortOrder: Number(row[12] || 0),
+      createdAt: row[13],
+      updatedAt: row[14],
+      spaceStatus: resolveSpaceStatus({ isBanned: Boolean(row[11]), token: row[2] })
     }
 
     res.json(account)
   } catch (error) {
     console.error('Ban GPT account error:', error)
     res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+
+// 更新账号排序
+router.patch('/reorder', async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(v => Number(v)).filter(Number.isFinite) : []
+    if (!ids.length) return res.status(400).json({ error: 'ids is required' })
+
+    const db = await getDatabase()
+    const placeholders = ids.map(() => '?').join(',')
+    const existing = db.exec(`SELECT id FROM gpt_accounts WHERE id IN (${placeholders})`, ids)
+    const existingSet = new Set((existing[0]?.values || []).map(row => Number(row[0])))
+    for (const id of ids) {
+      if (!existingSet.has(id)) return res.status(400).json({ error: `账号不存在: ${id}` })
+    }
+
+    ids.forEach((id, index) => {
+      db.run(
+        `UPDATE gpt_accounts SET sort_order = ?, updated_at = DATETIME('now', 'localtime') WHERE id = ?`,
+        [index + 1, id]
+      )
+    })
+    saveDatabase()
+    return res.json({ message: '排序更新成功' })
+  } catch (error) {
+    console.error('更新账号排序失败:', error)
+    return res.status(500).json({ error: '内部服务器错误' })
+  }
+})
+
+// 一键同步全部空间信息
+router.post('/sync-all', async (req, res) => {
+  try {
+    const db = await getDatabase()
+    const rows = db.exec(`SELECT id FROM gpt_accounts ORDER BY COALESCE(sort_order, id) ASC, created_at DESC`)
+    const ids = (rows[0]?.values || []).map(row => Number(row[0])).filter(Number.isFinite)
+
+    const results = []
+    for (const accountId of ids) {
+      try {
+        const userSync = await syncAccountUserCount(accountId)
+        const inviteSync = await syncAccountInviteCount(accountId, {
+          accountRecord: userSync.account,
+          inviteListParams: { offset: 0, limit: 1, query: '' }
+        })
+        results.push({ id: accountId, ok: true, account: inviteSync.account, syncedUserCount: userSync.syncedUserCount, inviteCount: inviteSync.inviteCount })
+      } catch (error) {
+        results.push({ id: accountId, ok: false, error: error?.message || '同步失败' })
+      }
+    }
+
+    return res.json({ message: '批量同步完成', total: ids.length, results })
+  } catch (error) {
+    console.error('批量同步失败:', error)
+    return res.status(500).json({ error: '内部服务器错误' })
   }
 })
 
