@@ -454,7 +454,8 @@ router.post('/', async (req, res) => {
       return code
     }
 
-    const availableSlots = Math.max(1, Math.floor(finalUserCount))
+    const totalCapacity = 5
+    const availableSlots = Math.max(0, totalCapacity - Math.floor(finalUserCount))
 
     // 自动生成兑换码并绑定到该账号
     const generatedCodes = []
