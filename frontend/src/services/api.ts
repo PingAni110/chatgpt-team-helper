@@ -1400,6 +1400,63 @@ export const gptAccountService = {
   }
 }
 
+export interface OpenAIOAuthSession {
+  authUrl: string
+  sessionId: string
+  instructions?: string[]
+}
+
+export interface OpenAIOAuthExchangeResult {
+  tokens: {
+    idToken: string
+    accessToken: string
+    refreshToken?: string
+    expiresIn: number
+  }
+  accountInfo: {
+    accountId: string
+    chatgptUserId: string
+    organizationId: string
+    organizationRole: string
+    organizationTitle: string
+    planType: string
+    email: string
+    name: string
+    emailVerified: boolean
+    organizations: any[]
+  }
+}
+
+export const openaiOAuthService = {
+  async generateAuthUrl(apiKey: string, payload?: { proxy?: string }): Promise<OpenAIOAuthSession> {
+    const response = await api.post('/openai-accounts/generate-auth-url', payload || {}, {
+      headers: {
+        'x-api-key': apiKey,
+      },
+    })
+
+    if (!response.data?.success) {
+      throw new Error(response.data?.message || response.data?.error || '生成 OpenAI 授权链接失败')
+    }
+
+    return response.data.data as OpenAIOAuthSession
+  },
+
+  async exchangeCode(apiKey: string, payload: { code: string; sessionId: string }): Promise<OpenAIOAuthExchangeResult> {
+    const response = await api.post('/openai-accounts/exchange-code', payload, {
+      headers: {
+        'x-api-key': apiKey,
+      },
+    })
+
+    if (!response.data?.success) {
+      throw new Error(response.data?.message || response.data?.error || '交换授权码失败')
+    }
+
+    return response.data.data as OpenAIOAuthExchangeResult
+  },
+}
+
 export const linuxDoAuthService = {
   async getAuthorizeUrl(redirectUri: string): Promise<{ url: string }> {
     const response = await api.get('/linuxdo/authorize-url', {
