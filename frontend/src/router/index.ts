@@ -204,6 +204,23 @@ const router = createRouter({
           component: PurchaseOrdersView,
           meta: { requiredMenuKey: 'purchase_orders', featureKey: 'payment' },
         },
+
+        {
+          path: 'product-management',
+          name: 'product-management',
+          component: PurchaseOrdersView,
+          meta: { requiredMenuKeys: ['product_management', 'purchase_orders'], featureKey: 'payment' },
+        },
+        {
+          path: 'products',
+          name: 'product-management-legacy-products',
+          redirect: { name: 'product-management' },
+        },
+        {
+          path: 'product',
+          name: 'product-management-legacy-product',
+          redirect: { name: 'product-management' },
+        },
         {
           path: 'credit-orders',
           name: 'credit-orders',
@@ -298,9 +315,15 @@ router.beforeEach(async (to, from, next) => {
   }
 
   const requiredMenuKey = String((to.meta as any)?.requiredMenuKey || '').trim()
-  if (to.meta.requiresAuth && requiredMenuKey) {
-    const alwaysAllowed = requiredMenuKey === 'user_info' || requiredMenuKey === 'my_orders'
-    if (!isSuperAdmin && !alwaysAllowed && !menus.includes(requiredMenuKey)) {
+  const requiredMenuKeys = Array.isArray((to.meta as any)?.requiredMenuKeys)
+    ? (to.meta as any).requiredMenuKeys.map((item: any) => String(item || '').trim()).filter(Boolean)
+    : []
+  const menuCandidates = requiredMenuKeys.length ? requiredMenuKeys : (requiredMenuKey ? [requiredMenuKey] : [])
+
+  if (to.meta.requiresAuth && menuCandidates.length > 0) {
+    const alwaysAllowed = menuCandidates.includes('user_info') || menuCandidates.includes('my_orders')
+    const hasMenuPermission = menuCandidates.some((key: string) => menus.includes(key))
+    if (!isSuperAdmin && !alwaysAllowed && !hasMenuPermission) {
       next(defaultAdminPath)
       return
     }
