@@ -294,6 +294,19 @@ export interface CreateGptAccountDto {
   expireAt?: string
 }
 
+export interface ChatgptAccountCheckInfo {
+  accountId: string
+  name: string
+  planType: string | null
+  expiresAt: string | null
+  hasActiveSubscription: boolean
+  isDemoted: boolean
+}
+
+export interface CheckGptAccessTokenResponse {
+  accounts: ChatgptAccountCheckInfo[]
+}
+
 export interface ChatgptAccountUser {
   id: string
   account_user_id?: string
@@ -641,6 +654,10 @@ export interface OpenAccountsResponse {
     creditCost: string
     dailyLimit: number | null
     todayBoardCount: number
+    userDailyLimitEnabled?: boolean
+    userDailyLimit?: number | null
+    userTodayBoardCount?: number
+    userDailyLimitRemaining?: number | null
     redeemBlockedHours?: { start: number; end: number }
     redeemBlockedNow?: boolean
     redeemBlockedMessage?: string
@@ -699,6 +716,17 @@ export interface CreditAdminBalanceResponse {
 
 export interface CreditAdminRefundResponse {
   message: string
+}
+
+export interface CreditAdminSyncResponse {
+  message: string
+  order?: {
+    orderNo: string
+    status: string
+    tradeNo?: string | null
+    paidAt?: string | null
+    refundedAt?: string | null
+  }
 }
 
 export interface WaitingRoomEntry {
@@ -1422,6 +1450,11 @@ export const gptAccountService = {
     await api.delete(`/gpt-accounts/${id}`)
   },
 
+  async checkAccessToken(token: string): Promise<CheckGptAccessTokenResponse> {
+    const response = await api.post('/gpt-accounts/check-token', { token })
+    return response.data
+  },
+
   async syncUserCount(id: number): Promise<SyncUserCountResponse> {
     const response = await api.post(`/gpt-accounts/${id}/sync-user-count`)
     return response.data
@@ -1478,6 +1511,63 @@ export const gptAccountService = {
     const response = await api.get(`/gpt-accounts/${accountId}/members`)
     return response.data
   }
+}
+
+export interface OpenAIOAuthSession {
+  authUrl: string
+  sessionId: string
+  instructions?: string[]
+}
+
+export interface OpenAIOAuthExchangeResult {
+  tokens: {
+    idToken: string
+    accessToken: string
+    refreshToken?: string
+    expiresIn: number
+  }
+  accountInfo: {
+    accountId: string
+    chatgptUserId: string
+    organizationId: string
+    organizationRole: string
+    organizationTitle: string
+    planType: string
+    email: string
+    name: string
+    emailVerified: boolean
+    organizations: any[]
+  }
+}
+
+export const openaiOAuthService = {
+  async generateAuthUrl(apiKey: string, payload?: { proxy?: string }): Promise<OpenAIOAuthSession> {
+    const response = await api.post('/openai-accounts/generate-auth-url', payload || {}, {
+      headers: {
+        'x-api-key': apiKey,
+      },
+    })
+
+    if (!response.data?.success) {
+      throw new Error(response.data?.message || response.data?.error || '生成 OpenAI 授权链接失败')
+    }
+
+    return response.data.data as OpenAIOAuthSession
+  },
+
+  async exchangeCode(apiKey: string, payload: { code: string; sessionId: string }): Promise<OpenAIOAuthExchangeResult> {
+    const response = await api.post('/openai-accounts/exchange-code', payload, {
+      headers: {
+        'x-api-key': apiKey,
+      },
+    })
+
+    if (!response.data?.success) {
+      throw new Error(response.data?.message || response.data?.error || '交换授权码失败')
+    }
+
+    return response.data.data as OpenAIOAuthExchangeResult
+  },
 }
 
 export const linuxDoAuthService = {
@@ -1613,7 +1703,12 @@ export const creditService = {
   async adminRefundOrder(orderNo: string): Promise<CreditAdminRefundResponse> {
     const response = await api.post(`/credit/admin/orders/${encodeURIComponent(orderNo)}/refund`)
     return response.data
-  }
+  },
+
+  async adminSyncOrder(orderNo: string): Promise<CreditAdminSyncResponse> {
+    const response = await api.post(`/credit/admin/orders/${encodeURIComponent(orderNo)}/sync`)
+    return response.data
+  },
 }
 
 export const waitingRoomService = {

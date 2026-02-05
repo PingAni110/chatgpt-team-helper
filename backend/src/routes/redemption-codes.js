@@ -1066,8 +1066,13 @@ router.post('/recover', async (req, res) => {
                 SELECT COUNT(1)
                 FROM account_recovery_logs ar2
                 WHERE ar2.original_code_id = rc.id
-              ) AS attempts
+              ) AS attempts,
+              co.status AS credit_order_status,
+              co.refunded_at AS credit_order_refunded_at
             FROM redemption_codes rc
+            LEFT JOIN credit_orders co
+              ON co.order_no = rc.reserved_for_order_no
+              AND co.scene = 'open_accounts_board'
             LEFT JOIN account_recovery_logs ar_recovery
               ON ar_recovery.recovery_code_id = rc.id
               AND ar_recovery.status IN ('success', 'skipped')
@@ -1098,7 +1103,9 @@ router.post('/recover', async (req, res) => {
             cw.current_account_email,
             ga.id AS current_account_id,
             ga.email AS current_account_record_email,
-            COALESCE(ga.is_banned, 0) AS current_is_banned
+            COALESCE(ga.is_banned, 0) AS current_is_banned,
+            cw.credit_order_status,
+            cw.credit_order_refunded_at
           FROM candidates_with_current cw
           LEFT JOIN gpt_accounts ga ON lower(ga.email) = cw.current_account_email
           ORDER BY cw.original_redeemed_at ASC, cw.original_code_id ASC
@@ -1127,7 +1134,9 @@ router.post('/recover', async (req, res) => {
         currentAccountEmail: row[8] ? String(row[8]) : '',
         currentAccountId: row[9] != null ? Number(row[9]) : null,
         currentAccountRecordEmail: row[10] ? String(row[10]) : null,
-        currentIsBanned: Number(row[11] || 0) === 1
+        currentIsBanned: Number(row[11] || 0) === 1,
+        creditOrderStatus: row[12] ? String(row[12]) : null,
+        creditOrderRefundedAt: row[13] ? String(row[13]) : null
       }))
 
       const eligibleCandidates = candidates.filter(candidate => !isNoWarrantyOrderType(candidate.orderType))
@@ -1140,15 +1149,35 @@ router.post('/recover', async (req, res) => {
         })
       }
 
-      const firstCandidate = eligibleCandidates[0]
-      let targetCandidate = eligibleCandidates.find(candidate => candidate.currentIsBanned) || null
+      const refundableCandidates = eligibleCandidates.filter(candidate => {
+        if (candidate.creditOrderRefundedAt) return false
+        const status = String(candidate.creditOrderStatus || '').trim().toLowerCase()
+        return status !== 'refunded'
+      })
+
+      if (refundableCandidates.length === 0) {
+        const firstCandidate = eligibleCandidates[0]
+        const windowEndsAt = buildRecoveryWindowEndsAt(firstCandidate.originalRedeemedAt)
+        return res.status(403).json({
+          error: 'Credit 订单已退款，无法补录，请联系客服',
+          message: 'Credit 订单已退款，无法补录，请联系客服',
+          code: 'CREDIT_ORDER_REFUNDED',
+          processedOriginalCodeId: firstCandidate.originalCodeId,
+          processedOriginalRedeemedAt: firstCandidate.originalRedeemedAt,
+          processedReason: 'credit_order_refunded',
+          windowEndsAt
+        })
+      }
+
+      const firstCandidate = refundableCandidates[0]
+      let targetCandidate = refundableCandidates.find(candidate => candidate.currentIsBanned) || null
       let processedReason = targetCandidate ? 'banned' : ''
 
       const accessCache = new Map()
       let unknownSyncError = null
 
       if (!targetCandidate) {
-        for (const candidate of eligibleCandidates) {
+        for (const candidate of refundableCandidates) {
           const accountId = candidate.currentAccountId
           if (!candidate.currentAccountEmail || !accountId) {
             targetCandidate = candidate

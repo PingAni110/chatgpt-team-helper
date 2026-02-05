@@ -1994,22 +1994,26 @@ router.get('/account-recovery/banned-accounts', async (req, res) => {
 	            AND rc.is_redeemed = 1
             AND rc.redeemed_at IS NOT NULL
             AND rc.redeemed_at >= DATETIME('now', 'localtime', ?)
-            AND (
-              EXISTS (
-                SELECT 1
-                FROM purchase_orders po
-                WHERE (po.code_id = rc.id OR (po.code_id IS NULL AND po.code = rc.code))
-                  AND po.created_at >= DATETIME('now', 'localtime', ?)
-              )
-              OR EXISTS (
-                SELECT 1
-                FROM credit_orders co
-                WHERE (co.code_id = rc.id OR (co.code_id IS NULL AND co.code = rc.code))
-                  AND co.created_at >= DATETIME('now', 'localtime', ?)
-              )
-              OR EXISTS (
-                SELECT 1
-                FROM xhs_orders xo
+	            AND (
+	              EXISTS (
+	                SELECT 1
+	                FROM purchase_orders po
+	                WHERE (po.code_id = rc.id OR (po.code_id IS NULL AND po.code = rc.code))
+	                  AND po.created_at >= DATETIME('now', 'localtime', ?)
+	                  AND po.refunded_at IS NULL
+	                  AND COALESCE(po.status, '') != 'refunded'
+	              )
+	              OR EXISTS (
+	                SELECT 1
+	                FROM credit_orders co
+	                WHERE (co.code_id = rc.id OR (co.code_id IS NULL AND co.code = rc.code))
+	                  AND co.created_at >= DATETIME('now', 'localtime', ?)
+	                  AND co.refunded_at IS NULL
+	                  AND COALESCE(co.status, '') != 'refunded'
+	              )
+	              OR EXISTS (
+	                SELECT 1
+	                FROM xhs_orders xo
                 WHERE (xo.assigned_code_id = rc.id OR (xo.assigned_code_id IS NULL AND xo.assigned_code = rc.code))
                   AND COALESCE(xo.order_time, xo.created_at) >= DATETIME('now', 'localtime', ?)
               )
@@ -2195,21 +2199,25 @@ router.get('/account-recovery/banned-accounts/:accountId/redeems', async (req, r
       `rc.redeemed_at >= DATETIME('now', 'localtime', ?)`,
       `
         (
-          EXISTS (
-            SELECT 1
-            FROM purchase_orders po
-            WHERE (po.code_id = rc.id OR (po.code_id IS NULL AND po.code = rc.code))
-              AND po.created_at >= DATETIME('now', 'localtime', ?)
-          )
-          OR EXISTS (
-            SELECT 1
-            FROM credit_orders co
-            WHERE (co.code_id = rc.id OR (co.code_id IS NULL AND co.code = rc.code))
-              AND co.created_at >= DATETIME('now', 'localtime', ?)
-          )
-          OR EXISTS (
-            SELECT 1
-            FROM xhs_orders xo
+	          EXISTS (
+	            SELECT 1
+	            FROM purchase_orders po
+	            WHERE (po.code_id = rc.id OR (po.code_id IS NULL AND po.code = rc.code))
+	              AND po.created_at >= DATETIME('now', 'localtime', ?)
+	              AND po.refunded_at IS NULL
+	              AND COALESCE(po.status, '') != 'refunded'
+	          )
+	          OR EXISTS (
+	            SELECT 1
+	            FROM credit_orders co
+	            WHERE (co.code_id = rc.id OR (co.code_id IS NULL AND co.code = rc.code))
+	              AND co.created_at >= DATETIME('now', 'localtime', ?)
+	              AND co.refunded_at IS NULL
+	              AND COALESCE(co.status, '') != 'refunded'
+	          )
+	          OR EXISTS (
+	            SELECT 1
+	            FROM xhs_orders xo
             WHERE (xo.assigned_code_id = rc.id OR (xo.assigned_code_id IS NULL AND xo.assigned_code = rc.code))
               AND COALESCE(xo.order_time, xo.created_at) >= DATETIME('now', 'localtime', ?)
           )
@@ -2515,22 +2523,26 @@ router.post('/account-recovery/recover', async (req, res) => {
 	              AND rc.redeemed_at >= DATETIME('now', 'localtime', ?)
 	              AND ar_recovery.id IS NULL
 	              AND ga.is_banned = 1
-	              AND (
-	                EXISTS (
-	                  SELECT 1
-                  FROM purchase_orders po
-                  WHERE (po.code_id = rc.id OR (po.code_id IS NULL AND po.code = rc.code))
-                    AND po.created_at >= DATETIME('now', 'localtime', ?)
-                )
-                OR EXISTS (
-                  SELECT 1
-                  FROM credit_orders co
-                  WHERE (co.code_id = rc.id OR (co.code_id IS NULL AND co.code = rc.code))
-                    AND co.created_at >= DATETIME('now', 'localtime', ?)
-                )
-                OR EXISTS (
-                  SELECT 1
-                  FROM xhs_orders xo
+		              AND (
+		                EXISTS (
+		                  SELECT 1
+		                  FROM purchase_orders po
+		                  WHERE (po.code_id = rc.id OR (po.code_id IS NULL AND po.code = rc.code))
+		                    AND po.created_at >= DATETIME('now', 'localtime', ?)
+		                    AND po.refunded_at IS NULL
+		                    AND COALESCE(po.status, '') != 'refunded'
+		                )
+		                OR EXISTS (
+		                  SELECT 1
+		                  FROM credit_orders co
+		                  WHERE (co.code_id = rc.id OR (co.code_id IS NULL AND co.code = rc.code))
+		                    AND co.created_at >= DATETIME('now', 'localtime', ?)
+		                    AND co.refunded_at IS NULL
+		                    AND COALESCE(co.status, '') != 'refunded'
+		                )
+		                OR EXISTS (
+		                  SELECT 1
+		                  FROM xhs_orders xo
                   WHERE (xo.assigned_code_id = rc.id OR (xo.assigned_code_id IS NULL AND xo.assigned_code = rc.code))
                     AND COALESCE(xo.order_time, xo.created_at) >= DATETIME('now', 'localtime', ?)
                 )

@@ -75,6 +75,12 @@
                 <span v-if="rules.dailyLimit" class="px-2 py-1 rounded-full bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 border border-orange-100 dark:border-orange-800">
                   今日名额 {{ rules.todayBoardCount }}/{{ rules.dailyLimit }}
                 </span>
+                <span
+                  v-if="rules.userDailyLimitEnabled && rules.userDailyLimit"
+                  class="px-2 py-1 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border border-emerald-100 dark:border-emerald-800"
+                >
+                  当日购买次数 {{ rules.userDailyLimitRemaining ?? 0 }}/{{ rules.userDailyLimit }}
+                </span>
 	                <span class="px-2 py-1 rounded-full bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border border-amber-100 dark:border-amber-800">
 	                  每日 {{ redeemBlockedHoursLabel }} 暂停兑换
 	                </span>
@@ -296,14 +302,15 @@
         </template>
       </div>
 
-      <LinuxDoUserPopover
-        v-if="linuxDoUser"
-        :user="linuxDoUser"
-        :avatar-url="avatarUrl"
-        :display-name="linuxDoDisplayName"
-        :trust-level-label="trustLevelLabel"
-        @reauthorize="handleReauthorize"
-      />
+	      <LinuxDoUserPopover
+	        v-if="linuxDoUser"
+	        :user="linuxDoUser"
+	        :avatar-url="avatarUrl"
+	        :display-name="linuxDoDisplayName"
+	        :trust-level-label="trustLevelLabel"
+	        :github-repo-url="githubRepoUrl"
+	        @reauthorize="handleReauthorize"
+	      />
 
 	      <Dialog v-model:open="showEmailDialog">
 	        <DialogContent :showClose="false" class="sm:max-w-[360px] p-0 overflow-hidden rounded-[20px] border-0 shadow-2xl bg-transparent">
@@ -492,6 +499,8 @@
 	import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 	import { useToast } from '@/components/ui/toast'
   import { useAppConfigStore } from '@/stores/appConfig'
+
+	const githubRepoUrl = 'https://github.com/Kylsky/chatgpt-team-helper'
 
 	const accounts = ref<OpenAccountItem[]>([])
 	const loading = ref(false)

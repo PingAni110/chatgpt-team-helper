@@ -36,7 +36,7 @@ const RECONNECT_DELAY_MS = 5000
 const DEFAULT_SYNC_POLL_INTERVAL_SECONDS = 60
 
 const DEFAULT_DELIVERY_MESSAGE =
-  '请访问网页输入邮箱和订单号进行自助激活：https://team.yeelovo.com/redeem/xianyu'
+  '请访问网页输入邮箱和订单号进行自助激活：https://team.example.com/redeem/xianyu'
 
 const ORDER_STATUS_MESSAGES = [
   '[我已拍下，待付款]',

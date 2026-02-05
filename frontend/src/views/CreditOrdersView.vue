@@ -19,6 +19,7 @@ const balance = ref<CreditAdminBalanceResponse | null>(null)
 const loading = ref(false)
 const error = ref('')
 const refundingOrderNo = ref<string | null>(null)
+const syncingOrderNo = ref<string | null>(null)
 const teleportReady = ref(false)
 
 // 分页相关状态（真实后端分页）
@@ -125,6 +126,28 @@ const onStatusFilterChange = (value: string) => {
 }
 
 const canRefund = (order: CreditAdminOrder) => order.status === 'paid' && !order.refundedAt
+const canSync = (order: CreditAdminOrder) => !['paid', 'refunded'].includes(order.status)
+
+const syncOrderStatus = async (order: CreditAdminOrder) => {
+  if (!canSync(order)) return
+
+  syncingOrderNo.value = order.orderNo
+  try {
+    const resp = await creditService.adminSyncOrder(order.orderNo)
+    showSuccessToast(resp.message || '已同步')
+    await loadAll()
+  } catch (err: any) {
+    if (err?.response?.status === 401 || err?.response?.status === 403) {
+      authService.logout()
+      router.push('/login')
+      return
+    }
+    const message = err?.response?.data?.error || err?.message || '同步失败'
+    showErrorToast(message)
+  } finally {
+    syncingOrderNo.value = null
+  }
+}
 
 const refundOrder = async (order: CreditAdminOrder) => {
   if (typeof window === 'undefined') return
@@ -391,18 +414,31 @@ onUnmounted(() => {
                    <td class="px-6 py-5 text-sm text-gray-500 whitespace-nowrap">{{ formatDate(item.createdAt) }}</td>
                    <td class="px-6 py-5 text-sm text-gray-500 whitespace-nowrap">{{ formatDate(item.paidAt || null) }}</td>
                    <td class="px-6 py-5 text-right">
+                      <div class="flex items-center justify-end gap-2">
+                        <Button
+                          v-if="canSync(item)"
+                          variant="outline"
+                          size="sm"
+                          class="h-8 text-xs border-gray-200 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                          :disabled="syncingOrderNo === item.orderNo"
+                          @click="syncOrderStatus(item)"
+                        >
+                          <RefreshCw class="h-3 w-3 mr-1.5" :class="syncingOrderNo === item.orderNo ? 'animate-spin' : ''" />
+                          更新状态
+                        </Button>
                       <Button
-                         v-if="item.status === 'paid'"
+                         v-if="canRefund(item)"
                          variant="outline"
                          size="sm"
                          class="h-8 text-xs border-gray-200 hover:border-red-200 hover:bg-red-50 hover:text-red-600 transition-colors"
-                         :disabled="refundingOrderNo === item.orderNo"
+                         :disabled="refundingOrderNo === item.orderNo || syncingOrderNo === item.orderNo"
                          @click="refundOrder(item)"
                       >
                    <RotateCcw class="h-3 w-3 mr-1.5" :class="refundingOrderNo === item.orderNo ? 'animate-spin' : ''" />
                          退款
                       </Button>
-                      <span v-else class="text-gray-300 text-xs">-</span>
+                      <span v-if="!canRefund(item) && !canSync(item)" class="text-gray-300 text-xs">-</span>
+                      </div>
                    </td>
                 </tr>
              </tbody>

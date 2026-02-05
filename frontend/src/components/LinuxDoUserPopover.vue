@@ -1,33 +1,47 @@
 <template>
   <div class="fixed top-4 right-4 sm:top-8 sm:right-12 z-30 flex flex-col items-end gap-3">
-    <button
-      ref="buttonRef"
-      type="button"
-      class="flex items-center gap-3 rounded-full bg-white/90 dark:bg-black/60 border border-white/70 dark:border-white/20 px-2.5 py-1.5 shadow-lg shadow-black/10 backdrop-blur-lg transition-all duration-200 hover:-translate-y-0.5 hover:shadow-2xl"
-      :aria-expanded="isOpen"
-      @click="toggle"
-    >
-      <img
-        v-if="props.avatarUrl"
-        :src="props.avatarUrl"
-        alt="avatar"
-        class="h-10 w-10 rounded-2xl border border-white/80 object-cover shadow"
-      />
-      <div
-        v-else
-        class="h-10 w-10 rounded-2xl bg-[#007AFF]/10 text-[#007AFF] flex items-center justify-center font-semibold"
+    <div class="flex items-center gap-3">
+      <a
+        v-if="props.githubRepoUrl"
+        :href="props.githubRepoUrl"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="h-[52px] w-[52px] inline-flex items-center justify-center rounded-full bg-white/90 dark:bg-black/60 border border-white/70 dark:border-white/20 shadow-lg shadow-black/10 backdrop-blur-lg transition-all duration-200 hover:-translate-y-0.5 hover:shadow-2xl"
+        aria-label="Open GitHub repository"
+        title="GitHub"
       >
-        {{ userInitial }}
-      </div>
-      <div class="hidden sm:flex flex-col items-start">
-        <span class="text-sm font-semibold text-[#1d1d1f] dark:text-white">{{ props.displayName }}</span>
-        <span class="text-xs text-[#86868b]">UID #{{ props.user?.id }}</span>
-      </div>
-      <ChevronDown
-        class="h-4 w-4 text-[#86868b] transition-transform duration-200"
-        :class="{ 'rotate-180 text-[#007AFF]': isOpen }"
-      />
-    </button>
+        <Github class="h-5 w-5 text-[#1d1d1f] dark:text-white" />
+      </a>
+
+      <button
+        ref="buttonRef"
+        type="button"
+        class="flex items-center gap-3 rounded-full bg-white/90 dark:bg-black/60 border border-white/70 dark:border-white/20 px-2.5 py-1.5 shadow-lg shadow-black/10 backdrop-blur-lg transition-all duration-200 hover:-translate-y-0.5 hover:shadow-2xl"
+        :aria-expanded="isOpen"
+        @click="toggle"
+      >
+        <img
+          v-if="props.avatarUrl"
+          :src="props.avatarUrl"
+          alt="avatar"
+          class="h-10 w-10 rounded-2xl border border-white/80 object-cover shadow"
+        />
+        <div
+          v-else
+          class="h-10 w-10 rounded-2xl bg-[#007AFF]/10 text-[#007AFF] flex items-center justify-center font-semibold"
+        >
+          {{ userInitial }}
+        </div>
+        <div class="hidden sm:flex flex-col items-start">
+          <span class="text-sm font-semibold text-[#1d1d1f] dark:text-white">{{ props.displayName }}</span>
+          <span class="text-xs text-[#86868b]">UID #{{ props.user?.id }}</span>
+        </div>
+        <ChevronDown
+          class="h-4 w-4 text-[#86868b] transition-transform duration-200"
+          :class="{ 'rotate-180 text-[#007AFF]': isOpen }"
+        />
+      </button>
+    </div>
 
     <div
       v-if="isOpen"
@@ -75,7 +89,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppleButton from '@/components/ui/apple/Button.vue'
-import { ChevronDown } from 'lucide-vue-next'
+import { ChevronDown, Github } from 'lucide-vue-next'
 import type { LinuxDoUser } from '@/services/api'
 
 const props = defineProps<{
@@ -83,6 +97,7 @@ const props = defineProps<{
   avatarUrl: string
   displayName: string
   trustLevelLabel: string
+  githubRepoUrl?: string
 }>()
 
 const emit = defineEmits<{

@@ -238,7 +238,13 @@ const loadOrCreateLinuxDoUser = async (db, { uid, username }) => {
     [uid, username]
   )
   saveDatabase()
-  return { uid, username, email: '', currentOpenAccountId: null, currentOpenAccountEmail: '' }
+  return {
+    uid,
+    username,
+    email: '',
+    currentOpenAccountId: null,
+    currentOpenAccountEmail: ''
+  }
 }
 
 const updateLinuxDoUserCurrentAccount = (db, uid, username, accountId, openAccountEmail) => {
@@ -296,6 +302,13 @@ const detectEmailInAccountQueues = async (accountId, email) => {
 // 获取每日上车限制配置
 const getDailyBoardLimit = () => {
   const limit = toInt(process.env.OPEN_ACCOUNTS_DAILY_BOARD_LIMIT, 0)
+  return limit > 0 ? limit : 0 // 0 表示不限制
+}
+
+// 获取用户每日上车次数限制配置（全局 env）
+const isUserDailyBoardLimitEnabled = () => isEnabledFlag(process.env.OPEN_ACCOUNTS_USER_DAILY_BOARD_LIMIT_ENABLED, false)
+const getUserDailyBoardLimit = () => {
+  const limit = toInt(process.env.OPEN_ACCOUNTS_USER_DAILY_BOARD_LIMIT, 0)
   return limit > 0 ? limit : 0 // 0 表示不限制
 }
 
@@ -357,6 +370,38 @@ const getTodayBoardCount = (db) => {
   return Number(result[0]?.values?.[0]?.[0] || 0)
 }
 
+// 查询用户今日已上车/占用次数（包含已上车 + 未过期的未完成订单 + 已支付未上车）
+const getUserTodayBoardOrderCount = (db, uid) => {
+  if (!db || !uid) return 0
+  const expireMinutes = Math.max(5, toInt(process.env.CREDIT_ORDER_EXPIRE_MINUTES, 15))
+  const threshold = `-${expireMinutes} minutes`
+  const result = db.exec(
+    `
+      SELECT COUNT(1)
+      FROM credit_orders
+      WHERE uid = ?
+        AND scene = 'open_accounts_board'
+        AND (
+          (
+            action_status = 'fulfilled'
+            AND DATE(updated_at) = DATE('now', 'localtime')
+          )
+          OR (
+            DATE(created_at) = DATE('now', 'localtime')
+            AND status IN ('created', 'pending_payment', 'paid')
+            AND (
+              status = 'paid'
+              OR paid_at IS NOT NULL
+              OR created_at >= DATETIME('now', 'localtime', ?)
+            )
+          )
+        )
+    `,
+    [uid, threshold]
+  )
+  return Number(result[0]?.values?.[0]?.[0] || 0)
+}
+
 // 获取已开放账号（卡片页展示用）
 router.get('/', authenticateLinuxDoSession, async (req, res) => {
   const uid = normalizeUid(req.linuxdo?.uid)
@@ -373,11 +418,15 @@ router.get('/', authenticateLinuxDoSession, async (req, res) => {
     // 获取规则配置
     const dailyLimit = getDailyBoardLimit()
     const creditCost = formatCreditMoney(process.env.OPEN_ACCOUNTS_CREDIT_COST || process.env.LINUXDO_OPEN_ACCOUNTS_CREDIT_COST || '10')
+    const userDailyLimitEnabled = isUserDailyBoardLimitEnabled() && getUserDailyBoardLimit() > 0
+    const userDailyLimit = userDailyLimitEnabled ? getUserDailyBoardLimit() : 0
 
     // 获取今日已上车人数
     const todayBoardCount = getTodayBoardCount(db)
 
-    // 获取用户本月上车次数
+    const userTodayBoardCount = uid ? getUserTodayBoardOrderCount(db, uid) : 0
+    const userDailyLimitRemaining =
+      userDailyLimitEnabled && userDailyLimit > 0 ? Math.max(0, userDailyLimit - userTodayBoardCount) : null
     const redeemBlockedHours = getOpenAccountsRedeemBlockedHours()
 
     const visibleWithinDays = getOpenAccountsVisibleCreatedWithinDays()
@@ -512,6 +561,10 @@ router.get('/', authenticateLinuxDoSession, async (req, res) => {
         creditCost,
         dailyLimit: dailyLimit || null,
         todayBoardCount,
+        userDailyLimitEnabled,
+        userDailyLimit: userDailyLimitEnabled && userDailyLimit > 0 ? userDailyLimit : null,
+        userTodayBoardCount,
+        userDailyLimitRemaining,
         redeemBlockedHours,
         redeemBlockedNow: isOpenAccountsRedeemBlockedNow(),
         redeemBlockedMessage: buildOpenAccountsRedeemBlockedMessage()
@@ -796,6 +849,16 @@ router.post('/:accountId/board', authenticateLinuxDoSession, async (req, res) =>
                 payUrl: resolvedExisting[2] ? String(resolvedExisting[2]) : null,
                 status: String(resolvedExisting[3] || 'created')
               }
+            }
+          }
+
+          // 检查用户每日上车次数限制（包含未完成订单，避免高并发时超额）
+          const userDailyLimitEnabled = isUserDailyBoardLimitEnabled()
+          const userDailyLimit = userDailyLimitEnabled ? getUserDailyBoardLimit() : 0
+          if (userDailyLimitEnabled && userDailyLimit > 0) {
+            const userTodayCount = getUserTodayBoardOrderCount(db, uid)
+            if (userTodayCount >= userDailyLimit) {
+              return { type: 'error', status: 429, error: `今日购买次数已达上限（${userDailyLimit}次），请明天再试` }
             }
           }
 

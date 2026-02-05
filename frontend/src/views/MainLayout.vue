@@ -4,7 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { authService, userService } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { filterAdminMenuTreeByFeatureFlags, getFallbackAdminMenuTree, normalizeAdminMenuTree, type AdminMenuNode } from '@/lib/adminMenus'
-import { Menu, X, LogOut, ChevronRight } from 'lucide-vue-next'
+import { Menu, X, LogOut, ChevronRight, Github } from 'lucide-vue-next'
 import { useBreakpoints } from '@vueuse/core'
 import { useAppConfigStore } from '@/stores/appConfig'
 
@@ -13,6 +13,7 @@ const route = useRoute()
 const appConfigStore = useAppConfigStore()
 
 const currentUser = ref(authService.getCurrentUser())
+const githubRepoUrl = 'https://github.com/Kylsky/chatgpt-team-helper'
 
 const syncCurrentUser = () => {
   currentUser.value = authService.getCurrentUser()
@@ -173,14 +174,22 @@ const isGroupExpanded = (key: string) => {
     >
       <!-- Logo 区域 -->
       <div class="px-8 pt-10 pb-6">
-        <router-link to="/admin" class="flex items-center gap-3 mb-2" @click="handleMenuClick">
-          <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
-            <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </div>
-          <span class="text-xl font-semibold tracking-tight text-gray-900">ChatGPT Team Helper</span>
-        </router-link>
+        <div class="flex items-center gap-3 mb-2">
+          <a
+            :href="githubRepoUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="w-8 h-8 rounded-lg bg-gradient-to-br from-gray-900 to-gray-700 flex items-center justify-center shadow-lg shadow-black/10 hover:from-gray-800 hover:to-gray-600 transition-colors"
+            aria-label="Open GitHub repository"
+            title="GitHub"
+            @click="handleMenuClick"
+          >
+            <Github class="w-5 h-5 text-white" />
+          </a>
+          <router-link to="/admin" class="text-xl font-semibold tracking-tight text-gray-900" @click="handleMenuClick">
+            ChatGPT Team Helper
+          </router-link>
+        </div>
         <p class="text-xs font-medium text-gray-400 pl-11">Management Console</p>
       </div>
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { authService, gptAccountService, type GptAccount, type CreateGptAccountDto, type SyncUserCountResponse, type GptAccountsListParams, type ChatgptAccountInviteItem, type ChatgptAccountUser } from '@/services/api'
+import { authService, gptAccountService, openaiOAuthService, userService, type GptAccount, type CreateGptAccountDto, type SyncUserCountResponse, type GptAccountsListParams, type ChatgptAccountInviteItem, type ChatgptAccountCheckInfo, type OpenAIOAuthSession, type OpenAIOAuthExchangeResult } from '@/services/api'
 import { formatShanghaiDate } from '@/lib/datetime'
 import { useAppConfigStore } from '@/stores/appConfig'
 import {
@@ -42,7 +42,7 @@ const paginationMeta = ref({ page: 1, pageSize: 10, total: 0 })
 const searchQuery = ref('')
 const openStatusFilter = ref<'all' | 'open' | 'closed'>('all')
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
-const { success: showSuccessToast, error: showErrorToast } = useToast()
+const { success: showSuccessToast, error: showErrorToast, warning: showWarningToast, info: showInfoToast } = useToast()
 const appConfigStore = useAppConfigStore()
 const dateFormatOptions = computed(() => ({
   timeZone: appConfigStore.timezone,
@@ -134,6 +134,242 @@ const formatExpireAtDisplay = (expireAt?: string | null) => {
     return formatShanghaiDate(new Date(iso), { locale: appConfigStore.locale, timeZone: 'Asia/Shanghai' })
   }
   return formatShanghaiDate(raw, { locale: appConfigStore.locale, timeZone: 'Asia/Shanghai' })
+const checkingAccessToken = ref(false)
+const checkedChatgptAccounts = ref<ChatgptAccountCheckInfo[]>([])
+const checkAccessTokenError = ref('')
+
+// OpenAI OAuth: 从授权码获取 refresh token（会话有效期 10 分钟）
+const showOpenaiOAuthPanel = ref(false)
+const openaiOAuthSession = ref<OpenAIOAuthSession | null>(null)
+const openaiOAuthResult = ref<OpenAIOAuthExchangeResult | null>(null)
+const openaiOAuthInput = ref('')
+const openaiOAuthError = ref('')
+const generatingOpenaiAuthUrl = ref(false)
+const exchangingOpenaiCode = ref(false)
+const cachedApiKey = ref<string>('')
+const cachedApiKeyConfigured = ref<boolean | null>(null)
+let openaiOAuthFlowNonce = 0
+
+const resolveRequestError = (err: any, fallback: string) => {
+  return (
+    err?.response?.data?.error ||
+    err?.response?.data?.message ||
+    err?.message ||
+    fallback
+  )
+}
+
+const ensureSystemApiKey = async (): Promise<string | null> => {
+  if (cachedApiKey.value) return cachedApiKey.value
+
+  try {
+    const result = await userService.getApiKey()
+    const apiKey = typeof result?.apiKey === 'string' ? result.apiKey.trim() : ''
+    cachedApiKeyConfigured.value = typeof result?.configured === 'boolean' ? result.configured : null
+    if (!apiKey) return null
+    cachedApiKey.value = apiKey
+    return apiKey
+  } catch (err) {
+    cachedApiKeyConfigured.value = null
+    return null
+  }
+}
+
+const resetOpenaiOAuthFlow = () => {
+  openaiOAuthFlowNonce += 1
+  showOpenaiOAuthPanel.value = false
+  openaiOAuthSession.value = null
+  openaiOAuthResult.value = null
+  openaiOAuthInput.value = ''
+  openaiOAuthError.value = ''
+  generatingOpenaiAuthUrl.value = false
+  exchangingOpenaiCode.value = false
+}
+
+const copyText = async (value: string, successMessage: string) => {
+  if (!value) return
+  try {
+    await navigator.clipboard.writeText(value)
+    showInfoToast(successMessage)
+  } catch (error) {
+    console.error('Copy failed', error)
+    showErrorToast('复制失败，请手动复制')
+  }
+}
+
+const extractOAuthCode = (value: string): string => {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+
+  try {
+    const url = new URL(raw)
+    const code = url.searchParams.get('code')
+    if (code) return code
+  } catch {
+    // ignore
+  }
+
+  const match = raw.match(/[?&]code=([^&#]+)/)
+  if (match?.[1]) {
+    try {
+      return decodeURIComponent(match[1])
+    } catch {
+      return match[1]
+    }
+  }
+
+  return raw
+}
+
+const generateOpenaiAuthUrl = async () => {
+  const currentNonce = openaiOAuthFlowNonce
+  openaiOAuthError.value = ''
+  openaiOAuthResult.value = null
+  openaiOAuthInput.value = ''
+
+  const apiKey = await ensureSystemApiKey()
+  if (!apiKey) {
+    const message =
+      cachedApiKeyConfigured.value === false
+        ? '系统未配置 API Key，请先到「系统设置」配置后再试'
+        : '获取 API Key 失败（需要系统设置权限）'
+    openaiOAuthError.value = message
+    showErrorToast(message)
+    return
+  }
+
+  try {
+    generatingOpenaiAuthUrl.value = true
+    const session = await openaiOAuthService.generateAuthUrl(apiKey)
+    if (currentNonce !== openaiOAuthFlowNonce) return
+    openaiOAuthSession.value = session
+    showOpenaiOAuthPanel.value = true
+  } catch (err: any) {
+    if (currentNonce !== openaiOAuthFlowNonce) return
+    openaiOAuthError.value = resolveRequestError(err, '生成授权链接失败')
+    showErrorToast(openaiOAuthError.value)
+  } finally {
+    if (currentNonce === openaiOAuthFlowNonce) {
+      generatingOpenaiAuthUrl.value = false
+    }
+  }
+}
+
+const handleClickGetRefreshToken = async () => {
+  showOpenaiOAuthPanel.value = true
+  if (openaiOAuthSession.value?.authUrl && openaiOAuthSession.value?.sessionId) return
+  await generateOpenaiAuthUrl()
+}
+
+const handleOpenAuthUrl = () => {
+  const url = String(openaiOAuthSession.value?.authUrl || '').trim()
+  if (!url) return
+  try {
+    window.open(url, '_blank', 'noopener,noreferrer')
+  } catch (error) {
+    console.error('Open auth url failed', error)
+    showErrorToast('打开失败，请复制链接到浏览器打开')
+  }
+}
+
+const handleExchangeOpenaiCode = async () => {
+  const currentNonce = openaiOAuthFlowNonce
+  const sessionId = String(openaiOAuthSession.value?.sessionId || '').trim()
+  if (!sessionId) {
+    showErrorToast('请先点击“获取”生成授权链接')
+    return
+  }
+
+  const code = extractOAuthCode(openaiOAuthInput.value)
+  if (!code) {
+    showErrorToast('请粘贴回调 URL 或授权码（code）')
+    return
+  }
+
+  const apiKey = await ensureSystemApiKey()
+  if (!apiKey) {
+    const message = '获取 API Key 失败（需要系统设置权限）'
+    openaiOAuthError.value = message
+    showErrorToast(message)
+    return
+  }
+
+  try {
+    exchangingOpenaiCode.value = true
+    openaiOAuthError.value = ''
+    const result = await openaiOAuthService.exchangeCode(apiKey, { code, sessionId })
+    if (currentNonce !== openaiOAuthFlowNonce) return
+    openaiOAuthResult.value = result
+
+    const accessToken = String(result?.tokens?.accessToken || '').trim()
+    const refreshToken = String(result?.tokens?.refreshToken || '').trim()
+    const accountId = String(result?.accountInfo?.accountId || '').trim()
+    const oauthEmail = String(result?.accountInfo?.email || '').trim()
+
+    if (accessToken) {
+      formData.value.token = accessToken
+    }
+    if (refreshToken) {
+      formData.value.refreshToken = refreshToken
+    } else {
+      showWarningToast('未返回 refresh token（可能未授予 offline_access），请确认授权 scope')
+    }
+    if (accountId) {
+      const existingAccountId = String(formData.value.chatgptAccountId || '').trim()
+      if (!existingAccountId) {
+        formData.value.chatgptAccountId = accountId
+      } else if (existingAccountId !== accountId) {
+        showWarningToast(`授权返回的 ChatGPT ID 为 ${accountId}，与表单不一致，请确认是否填错`)
+      }
+    }
+    if (oauthEmail) {
+      if (!String(formData.value.email || '').trim()) {
+        formData.value.email = oauthEmail
+      } else if (String(formData.value.email || '').trim().toLowerCase() !== oauthEmail.toLowerCase()) {
+        showWarningToast(`授权账号邮箱为 ${oauthEmail}，与表单邮箱不一致，请确认是否填错`)
+      }
+    }
+
+    // OAuth 交换接口不会返回 Team 订阅到期时间；这里用 access token 额外拉一次账号信息，
+    // 尝试自动填充过期时间（entitlement.expires_at）。
+    if (accessToken) {
+      const alreadyChecking = checkingAccessToken.value
+      if (!alreadyChecking) {
+        checkingAccessToken.value = true
+      }
+      try {
+        const checked = await gptAccountService.checkAccessToken(accessToken)
+        if (currentNonce !== openaiOAuthFlowNonce) return
+
+        checkedChatgptAccounts.value = Array.isArray(checked?.accounts) ? checked.accounts : []
+        checkAccessTokenError.value = ''
+
+        const preferredId = String(formData.value.chatgptAccountId || accountId || '').trim()
+        if (preferredId) {
+          applyCheckedAccountSelection(preferredId)
+        }
+      } catch (err: any) {
+        if (currentNonce !== openaiOAuthFlowNonce) return
+        // 不阻塞主流程，失败时允许用户手动填写
+        const message = resolveRequestError(err, '获取账号到期时间失败')
+        checkAccessTokenError.value = message
+      } finally {
+        if (!alreadyChecking && currentNonce === openaiOAuthFlowNonce) {
+          checkingAccessToken.value = false
+        }
+      }
+    }
+
+    showSuccessToast('已获取并填入 token 信息')
+  } catch (err: any) {
+    if (currentNonce !== openaiOAuthFlowNonce) return
+    openaiOAuthError.value = resolveRequestError(err, '交换授权码失败')
+    showErrorToast(openaiOAuthError.value)
+  } finally {
+    if (currentNonce === openaiOAuthFlowNonce) {
+      exchangingOpenaiCode.value = false
+    }
+  }
 }
 
 // 转换存储格式 (YYYY/MM/DD HH:mm:ss) 为 datetime-local 格式 (YYYY-MM-DDTHH:mm:ss)
@@ -158,6 +394,105 @@ const fromDatetimeLocal = (datetimeLocal: string): string => {
     return `${year}/${month}/${day} ${hour}:${minute}:${second}`
   }
   return datetimeLocal // 如果不匹配，返回原值让后端处理
+}
+
+const isoToDatetimeLocal = (isoString: string): string => {
+  const raw = String(isoString || '').trim()
+  if (!raw) return ''
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime())) return ''
+
+  try {
+    const parts = new Intl.DateTimeFormat('zh-CN', {
+      timeZone: appConfigStore.timezone || 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).formatToParts(date)
+    const get = (type: string) => parts.find(p => p.type === type)?.value || ''
+    const year = get('year')
+    const month = get('month')
+    const day = get('day')
+    const hour = get('hour')
+    const minute = get('minute')
+    const second = get('second') || '00'
+    if (year && month && day && hour && minute) {
+      return `${year}-${month}-${day}T${hour}:${minute}:${second}`
+    }
+  } catch {
+    // ignore and fallback to local time
+  }
+
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+const applyCheckedAccountSelection = (accountId: string) => {
+  const normalized = String(accountId || '').trim()
+  if (!normalized) return
+
+  const matched = checkedChatgptAccounts.value.find(acc => acc.accountId === normalized)
+  if (!matched) return
+
+  if (matched.expiresAt) {
+    const localValue = isoToDatetimeLocal(matched.expiresAt)
+    if (localValue) {
+      formData.value.expireAt = localValue
+    }
+  }
+}
+
+const openChatgptIdDropdown = async () => {
+  await nextTick()
+  const el = document.getElementById('chatgpt-account-id-input') as HTMLInputElement | null
+  el?.focus()
+  try {
+    // Best-effort: trigger the browser's datalist dropdown.
+    el?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }))
+  } catch {
+    // ignore
+  }
+}
+
+const handleCheckAccessToken = async () => {
+  const token = String(formData.value.token || '').trim()
+  if (!token) {
+    showErrorToast('请先填写 Access Token')
+    return
+  }
+
+  try {
+    checkingAccessToken.value = true
+    checkAccessTokenError.value = ''
+
+    const result = await gptAccountService.checkAccessToken(token)
+    checkedChatgptAccounts.value = Array.isArray(result?.accounts) ? result.accounts : []
+
+    if (!checkedChatgptAccounts.value.length) {
+      showErrorToast('校验成功，但未返回可用账号（可能没有 Team 账号权限）')
+      return
+    }
+
+    showSuccessToast(`校验成功：获取到 ${checkedChatgptAccounts.value.length} 个账号`)
+
+    // If user hasn't filled chatgptAccountId yet and there is only 1 option, autofill it.
+    if (!String(formData.value.chatgptAccountId || '').trim() && checkedChatgptAccounts.value.length === 1) {
+      formData.value.chatgptAccountId = checkedChatgptAccounts.value[0]?.accountId || ''
+    }
+
+    applyCheckedAccountSelection(formData.value.chatgptAccountId)
+    await openChatgptIdDropdown()
+  } catch (err: any) {
+    const message = err?.response?.data?.error || '校验失败'
+    checkAccessTokenError.value = message
+    showErrorToast(message)
+  } finally {
+    checkingAccessToken.value = false
+  }
 }
 
 // 切换页码
@@ -321,6 +656,9 @@ watch(
   () => formData.value.expireAt,
   () => {
     expireAtManuallyEdited.value = Boolean(formData.value.expireAt)
+  () => formData.value.chatgptAccountId,
+  (nextValue) => {
+    applyCheckedAccountSelection(String(nextValue || ''))
   }
 )
 
@@ -346,6 +684,10 @@ const closeDialog = () => {
   editingAccount.value = null
   formData.value = { email: '', token: '', refreshToken: '', userCount: 0, isDemoted: false, isBanned: false, chatgptAccountId: '', oaiDeviceId: '', expireAt: '' }
   expireAtManuallyEdited.value = false
+  checkedChatgptAccounts.value = []
+  checkAccessTokenError.value = ''
+  checkingAccessToken.value = false
+  resetOpenaiOAuthFlow()
 }
 
 const handleSubmit = async () => {
@@ -1077,15 +1419,15 @@ const handleInviteSubmit = async () => {
 
     <!-- Edit Dialog -->
     <Dialog v-model:open="showDialog">
-      <DialogContent class="sm:max-w-[500px] p-0 overflow-hidden bg-white border-none shadow-2xl rounded-3xl">
-        <DialogHeader class="px-8 pt-8 pb-4">
+      <DialogContent class="sm:max-w-[500px] p-0 overflow-hidden bg-white border-none shadow-2xl rounded-3xl max-h-[90vh] flex flex-col">
+        <DialogHeader class="px-8 pt-8 pb-4 shrink-0">
           <DialogTitle class="text-2xl font-bold text-gray-900">
             {{ editingAccount ? '编辑账号' : '新建账号' }}
           </DialogTitle>
         </DialogHeader>
         
-        <form @submit.prevent="handleSubmit" class="px-8 pb-8 space-y-5">
-           <div class="space-y-4">
+        <form @submit.prevent="handleSubmit" class="flex-1 min-h-0 flex flex-col">
+           <div class="flex-1 min-h-0 px-8 pb-6 space-y-4 overflow-y-auto">
               <div class="space-y-2">
                 <Label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">邮箱</Label>
                 <Input
@@ -1097,34 +1439,187 @@ const handleInviteSubmit = async () => {
                 />
               </div>
 
-   <div class="space-y-2">
+              <div class="space-y-2">
                 <Label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Access Token</Label>
-                <Input
-                  v-model="formData.token"
-                  required
-                  placeholder="sk-proj-..."
-                  class="h-11 bg-gray-50 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all font-mono text-sm"
-                />
+                <div class="flex items-center gap-2">
+                  <Input
+                    v-model="formData.token"
+                    required
+                    placeholder="sk-proj-..."
+                    class="h-11 flex-1 bg-gray-50 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all font-mono text-sm"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    class="h-11 rounded-xl border-gray-200"
+                    :disabled="checkingAccessToken || !formData.token?.trim()"
+                    @click="handleCheckAccessToken"
+                  >
+                    <template v-if="checkingAccessToken">
+                      <span class="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full mr-2"></span>
+                      校验中
+                    </template>
+                    <template v-else>
+                      校验
+                    </template>
+                  </Button>
+                </div>
+                <p v-if="checkAccessTokenError" class="text-[12px] text-red-600">{{ checkAccessTokenError }}</p>
+                <p v-else-if="checkedChatgptAccounts.length" class="text-[12px] text-gray-400">已获取 {{ checkedChatgptAccounts.length }} 个账号，可在 ChatGPT ID 下拉选择</p>
               </div>
 
               <div class="space-y-2">
                 <Label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Refresh Token</Label>
-                <Input
-                  v-model="formData.refreshToken"
-                  placeholder="可选，用于自动刷新"
-                  class="h-11 bg-gray-50 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all font-mono text-sm"
-                />
+                <div class="flex items-center gap-2">
+                  <Input
+                    v-model="formData.refreshToken"
+                    placeholder="可选，用于自动刷新"
+                    class="h-11 flex-1 bg-gray-50 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all font-mono text-sm"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    class="h-11 rounded-xl border-gray-200"
+                    :disabled="generatingOpenaiAuthUrl"
+                    @click="handleClickGetRefreshToken"
+                  >
+                    <template v-if="generatingOpenaiAuthUrl">
+                      <span class="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full mr-2"></span>
+                      生成中
+                    </template>
+                    <template v-else>
+                      获取
+                    </template>
+                  </Button>
+                </div>
+
+                <div
+                  v-if="showOpenaiOAuthPanel"
+                  class="rounded-2xl border border-gray-100 bg-gray-50/70 p-4 space-y-4"
+                >
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="space-y-1">
+                      <p class="text-sm font-semibold text-gray-800">通过 OpenAI OAuth 获取 Refresh Token</p>
+                      <p class="text-[12px] text-gray-500">会话有效期约 10 分钟；支持粘贴回调 URL 或直接粘贴 code。</p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      class="h-8 w-8 text-gray-400 hover:text-gray-700"
+                      :disabled="generatingOpenaiAuthUrl || exchangingOpenaiCode"
+                      @click="resetOpenaiOAuthFlow"
+                      title="关闭"
+                    >
+                      <X class="w-4 h-4" />
+                    </Button>
+                  </div>
+
+                  <div v-if="openaiOAuthSession?.authUrl" class="space-y-2">
+                    <Label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">授权链接</Label>
+                    <div class="flex items-center gap-2">
+                      <Input
+                        :model-value="openaiOAuthSession?.authUrl || ''"
+                        readonly
+                        class="h-11 flex-1 bg-white border-gray-200 rounded-xl font-mono text-xs"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        class="h-11 rounded-xl border-gray-200"
+                        @click="copyText(openaiOAuthSession?.authUrl || '', '已复制授权链接')"
+                      >
+                        复制
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        class="h-11 rounded-xl border-gray-200"
+                        @click="handleOpenAuthUrl"
+                      >
+                        打开
+                      </Button>
+                    </div>
+
+                    <div v-if="openaiOAuthSession?.instructions?.length" class="space-y-1 text-[12px] text-gray-500">
+                      <p v-for="(item, idx) in openaiOAuthSession.instructions" :key="idx">{{ item }}</p>
+                    </div>
+                  </div>
+
+                  <div class="space-y-2">
+                    <Label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">回调 URL / 授权码</Label>
+                    <Input
+                      v-model="openaiOAuthInput"
+                      placeholder="粘贴回调 URL（含 code=）或直接粘贴 code"
+                      class="h-11 bg-white border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all font-mono text-sm"
+                    />
+                  </div>
+
+                  <div class="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      class="h-11 rounded-xl"
+                      :disabled="exchangingOpenaiCode || !openaiOAuthInput.trim() || !openaiOAuthSession?.sessionId"
+                      @click="handleExchangeOpenaiCode"
+                    >
+                      <template v-if="exchangingOpenaiCode">
+                        <span class="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full mr-2"></span>
+                        转换中
+                      </template>
+                      <template v-else>
+                        转换并填入
+                      </template>
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      class="h-11 rounded-xl border-gray-200"
+                      :disabled="generatingOpenaiAuthUrl || exchangingOpenaiCode"
+                      @click="generateOpenaiAuthUrl"
+                    >
+                      重新获取链接
+                    </Button>
+                  </div>
+
+                  <p v-if="openaiOAuthError" class="text-[12px] text-red-600">{{ openaiOAuthError }}</p>
+
+                  <div
+                    v-if="openaiOAuthResult"
+                    class="rounded-xl bg-white/80 border border-gray-100 p-3 text-[12px] text-gray-600 space-y-1"
+                  >
+                    <p>已解析账号：{{ openaiOAuthResult?.accountInfo?.email || '-' }}</p>
+                    <p>ChatGPT ID：{{ openaiOAuthResult?.accountInfo?.accountId || '-' }}</p>
+                  </div>
+                </div>
               </div>
 
 		              <div class="grid grid-cols-2 gap-4">
 		                 <div class="space-y-2">
 		                    <Label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">ChatGPT ID</Label>
-		                    <Input
-		                      v-model="formData.chatgptAccountId"
-		                      required
-		                      placeholder="必填"
-		                      class="h-11 bg-gray-50 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all font-mono text-sm"
-		                    />
+                        <div class="flex items-center gap-2">
+                          <Input
+                            id="chatgpt-account-id-input"
+                            v-model="formData.chatgptAccountId"
+                            required
+                            placeholder="必填"
+                            :list="checkedChatgptAccounts.length ? 'chatgpt-account-id-options' : undefined"
+                            class="h-11 flex-1 bg-gray-50 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all font-mono text-sm"
+                          />
+                        </div>
+                        <datalist v-if="checkedChatgptAccounts.length" id="chatgpt-account-id-options">
+                          <option
+                            v-for="acc in checkedChatgptAccounts"
+                            :key="acc.accountId"
+                            :value="acc.accountId"
+                          >
+                            {{ acc.name }}{{ acc.expiresAt ? ` (到期 ${acc.expiresAt})` : '' }}
+                          </option>
+                        </datalist>
 		                 </div>
 		                 <div class="space-y-2">
 		                    <Label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">设备 ID</Label>
@@ -1191,7 +1686,7 @@ const handleInviteSubmit = async () => {
 		              </div>
 		           </div>
 
-           <DialogFooter class="pt-4">
+           <DialogFooter class="px-8 pb-8 pt-4 shrink-0 border-t border-gray-100 bg-white/80 backdrop-blur">
               <Button type="button" variant="ghost" @click="closeDialog" class="rounded-xl h-11 px-6 text-gray-500 hover:text-gray-900 hover:bg-gray-100">
                 取消
               </Button>
