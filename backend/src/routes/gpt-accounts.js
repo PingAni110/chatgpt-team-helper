@@ -5,6 +5,7 @@ import { authenticateToken } from '../middleware/auth.js'
 import { apiKeyAuth } from '../middleware/api-key-auth.js'
 import { requireMenu } from '../middleware/rbac.js'
 import { syncAccountUserCount, syncAccountInviteCount, fetchOpenAiAccountInfo, AccountSyncError, deleteAccountUser, inviteAccountUser, deleteAccountInvite } from '../services/account-sync.js'
+import { SPACE_MEMBER_LIMIT, calcRedeemableSlots, normalizeMemberCount } from '../utils/space-capacity.js'
 
 const router = express.Router()
 const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
@@ -341,8 +342,11 @@ router.post('/', async (req, res) => {
 
     const db = await getDatabase()
 
-    // 设置默认人数为1而不是0
-    const finalUserCount = userCount !== undefined ? userCount : 1
+    // 账号初始人数默认 1；空间固定上限 5 人
+    const finalUserCount = normalizeMemberCount(userCount !== undefined ? userCount : 1)
+    if (finalUserCount > SPACE_MEMBER_LIMIT) {
+      return res.status(400).json({ error: `空间人数不能超过 ${SPACE_MEMBER_LIMIT} 人` })
+    }
 
     db.run(
       `INSERT INTO gpt_accounts (email, token, refresh_token, user_count, chatgpt_account_id, oai_device_id, expire_at, is_demoted, is_banned, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))`,
@@ -390,11 +394,9 @@ router.post('/', async (req, res) => {
       return code
     }
 
-    // 自动生成兑换码并绑定到该账号
-    // Team 账号默认总容量 5，新建账号默认人数按 1 计算，所以默认生成 4 个兑换码
-    const totalCapacity = 5
-    const currentUserCountForCodes = Math.max(1, Number(finalUserCount) || 1)
-    const codesToGenerate = Math.max(0, totalCapacity - currentUserCountForCodes)
+    // 自动生成兑换码并绑定到该账号。
+    // 策略：人数已满(>=5)时不生成兑换码，与现有“满员不可继续上车/不可继续发码”的逻辑保持一致。
+    const codesToGenerate = calcRedeemableSlots(finalUserCount, SPACE_MEMBER_LIMIT)
 
     const generatedCodes = []
     for (let i = 0; i < codesToGenerate; i++) {
@@ -437,7 +439,7 @@ router.post('/', async (req, res) => {
     res.status(201).json({
       account,
       generatedCodes: codes,
-      message: `账号创建成功，已自动生成${codes.length}个兑换码`
+      message: `账号创建成功，已自动生成${generatedCodes.length}个兑换码`
     })
   } catch (error) {
     console.error('Create GPT account error:', error)
@@ -496,6 +498,11 @@ router.put('/:id', async (req, res) => {
 
     const existingEmail = checkResult[0].values[0][1]
 
+    const normalizedUserCount = normalizeMemberCount(userCount)
+    if (normalizedUserCount > SPACE_MEMBER_LIMIT) {
+      return res.status(400).json({ error: `空间人数不能超过 ${SPACE_MEMBER_LIMIT} 人` })
+    }
+
     db.run(
       `UPDATE gpt_accounts
        SET email = ?,
@@ -515,7 +522,7 @@ router.put('/:id', async (req, res) => {
         email,
         token,
         refreshToken || null,
-        userCount || 0,
+        normalizedUserCount,
         normalizedChatgptAccountId,
         normalizedOaiDeviceId || null,
         hasExpireAt ? 1 : 0,
