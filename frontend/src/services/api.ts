@@ -277,6 +277,8 @@ export interface GptAccount {
   chatgptAccountId?: string
   oaiDeviceId?: string
   expireAt?: string | null
+  sortOrder?: number
+  spaceStatus?: { code: 'normal' | 'abnormal'; reason: string }
   createdAt: string
   updatedAt: string
 }
@@ -336,6 +338,19 @@ export interface ChatgptAccountInvitesResponse {
   total: number
   limit: number
   offset: number
+}
+
+export interface SyncAllAccountsResponse {
+  message: string
+  total: number
+  results: Array<{
+    id: number
+    ok: boolean
+    account?: GptAccount
+    syncedUserCount?: number
+    inviteCount?: number
+    error?: string
+  }>
 }
 
 export interface SyncUserCountResponse {
@@ -1359,6 +1374,16 @@ export const gptAccountService = {
 
   async syncUserCount(id: number): Promise<SyncUserCountResponse> {
     const response = await api.post(`/gpt-accounts/${id}/sync-user-count`)
+    return response.data
+  },
+
+  async syncAll(): Promise<SyncAllAccountsResponse> {
+    const response = await api.post('/gpt-accounts/sync-all')
+    return response.data
+  },
+
+  async reorder(ids: number[]): Promise<{ message: string }> {
+    const response = await api.patch('/gpt-accounts/reorder', { ids })
     return response.data
   },
 

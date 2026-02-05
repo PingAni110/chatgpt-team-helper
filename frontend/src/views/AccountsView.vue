@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/dialog'
 import { useToast } from '@/components/ui/toast'
 import AppleNativeDateTimeInput from '@/components/ui/apple/NativeDateTimeInput.vue'
-import { Plus, Eye, EyeOff, RefreshCw, Ban, FilePenLine, Trash2, AlertTriangle, X, FolderOpen, Search } from 'lucide-vue-next'
+import { Plus, Eye, EyeOff, RefreshCw, Ban, FilePenLine, Trash2, AlertTriangle, X, FolderOpen, Search, CheckCircle2, AlertCircle, ArrowUp, ArrowDown, Users } from 'lucide-vue-next'
 
 const router = useRouter()
 const accounts = ref<GptAccount[]>([])
@@ -45,10 +45,28 @@ let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
 const { success: showSuccessToast, error: showErrorToast, warning: showWarningToast, info: showInfoToast } = useToast()
 const appConfigStore = useAppConfigStore()
 const dateFormatOptions = computed(() => ({
-  timeZone: appConfigStore.timezone,
-  locale: appConfigStore.locale,
+  timeZone: 'Asia/Shanghai',
+  locale: appConfigStore.locale || 'zh-CN',
 }))
 
+
+const syncingAllAccounts = ref(false)
+const activeSpaceTab = ref<'normal' | 'abnormal'>('normal')
+
+const resolveAccountStatus = (account: GptAccount) => {
+  const status = account.spaceStatus
+  if (status?.code === 'abnormal') return status
+  if (account.isBanned) return { code: 'abnormal', reason: '账号被封' }
+  if (!String(account.token || '').trim()) return { code: 'abnormal', reason: 'Token 失效' }
+  return { code: 'normal', reason: '正常' }
+}
+
+const displayedAccounts = computed(() => {
+  return accounts.value.filter((account) => {
+    const status = resolveAccountStatus(account)
+    return activeSpaceTab.value === 'normal' ? status.code === 'normal' : status.code === 'abnormal'
+  })
+})
 // Teleport 目标是否存在
 const teleportReady = ref(false)
 
@@ -516,6 +534,13 @@ const loadAccounts = async () => {
 }
 
 // 搜索处理
+const handleSpaceTabChange = async (tab: 'normal' | 'abnormal') => {
+  if (activeSpaceTab.value === tab) return
+  activeSpaceTab.value = tab
+  paginationMeta.value.page = 1
+  await loadAccounts()
+}
+
 const handleSearch = () => {
   paginationMeta.value.page = 1
   if (searchDebounceTimer) {
@@ -744,6 +769,70 @@ const scheduleResyncAfterAction = (accountId: number) => {
   }, RESYNC_AFTER_ACTION_DELAY_MS)
 }
 
+
+const handleMoveAccount = async (account: GptAccount, direction: 'up' | 'down') => {
+  const list = accounts.value
+  const index = list.findIndex(item => item.id === account.id)
+  if (index === -1) return
+  const targetIndex = direction === 'up' ? index - 1 : index + 1
+  if (targetIndex < 0 || targetIndex >= list.length) return
+
+  const next = [...list]
+  const current = next[index]
+  const target = next[targetIndex]
+  if (!current || !target) return
+  next[index] = target
+  next[targetIndex] = current
+  accounts.value = next
+
+  try {
+    await gptAccountService.reorder(next.map(item => item.id))
+    showSuccessToast('排序已更新')
+  } catch (err: any) {
+    showErrorToast(err?.response?.data?.error || '排序保存失败')
+    await loadAccounts()
+  }
+}
+
+const handleSyncAllSpaces = async () => {
+  if (syncingAllAccounts.value) return
+  syncingAllAccounts.value = true
+  try {
+    const result = await gptAccountService.syncAll()
+    const okCount = (result.results || []).filter(item => item.ok).length
+    const failCount = (result.results || []).length - okCount
+    showSuccessToast(`同步完成：成功 ${okCount}，失败 ${failCount}`)
+    await loadAccounts()
+  } catch (err: any) {
+    showErrorToast(err?.response?.data?.error || '一键同步失败')
+  } finally {
+    syncingAllAccounts.value = false
+  }
+}
+
+const handleShowMembers = async (account: GptAccount) => {
+  cancelResyncAfterAction()
+  syncingAccountId.value = account.id
+  syncError.value = ''
+  syncResult.value = null
+  invitesList.value = []
+  activeTab.value = 'members'
+  previousUserCount.value = account.userCount
+  previousInviteCount.value = typeof account.inviteCount === 'number' ? account.inviteCount : null
+
+  try {
+    const result = await gptAccountService.syncUserCount(account.id)
+    applySyncResultToState(result)
+    showSyncResultDialog.value = true
+    loadInvites(account.id)
+  } catch (err: any) {
+    syncError.value = err.response?.data?.error || '获取成员信息失败'
+    showSyncResultDialog.value = true
+  } finally {
+    syncingAccountId.value = null
+  }
+}
+
 const handleSyncUserCount = async (account: GptAccount) => {
   cancelResyncAfterAction()
   syncingAccountId.value = account.id
@@ -758,14 +847,10 @@ const handleSyncUserCount = async (account: GptAccount) => {
     const result = await gptAccountService.syncUserCount(account.id)
     applySyncResultToState(result)
 
-    // 显示同步结果对话框
-    showSyncResultDialog.value = true
-    
-    // 加载待加入列表
-    loadInvites(account.id)
+    // 同步后仅更新列表，不弹出成员信息
+    showSuccessToast('同步成功')
   } catch (err: any) {
-    syncError.value = err.response?.data?.error || '同步失败，请检查网络连接和账号配置'
-    showSyncResultDialog.value = true
+showErrorToast(err.response?.data?.error || '同步失败，请检查网络连接和账号配置')
   } finally {
     syncingAccountId.value = null
   }
@@ -918,6 +1003,16 @@ const handleInviteSubmit = async () => {
   <div class="space-y-8">
     <!-- Header Actions -->
     <Teleport v-if="teleportReady" to="#header-actions">
+      <div class="flex items-center gap-2">
+      <Button
+        @click="handleSyncAllSpaces"
+        :disabled="syncingAllAccounts"
+        variant="outline"
+        class="rounded-xl px-5 h-10"
+      >
+        <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': syncingAllAccounts }" />
+        一键同步
+      </Button>
       <Button
         @click="showDialog = true"
         class="bg-black hover:bg-gray-800 text-white rounded-xl px-5 h-10 shadow-lg shadow-black/10 transition-all hover:scale-[1.02] active:scale-[0.98]"
@@ -925,6 +1020,7 @@ const handleInviteSubmit = async () => {
         <Plus class="w-4 h-4 mr-2" />
         新建账号
       </Button>
+      </div>
     </Teleport>
 
     <!-- 筛选控制栏 -->
@@ -983,16 +1079,28 @@ const handleInviteSubmit = async () => {
 
       <!-- Table & Mobile List -->
       <div v-else>
+        <div class="px-6 pt-5">
+          <div class="inline-flex rounded-xl bg-gray-100 p-1 text-sm">
+            <button class="px-4 py-1.5 rounded-lg" :class="activeSpaceTab === 'normal' ? 'bg-white shadow text-gray-900' : 'text-gray-500'" @click="handleSpaceTabChange('normal')">正常空间</button>
+            <button class="px-4 py-1.5 rounded-lg" :class="activeSpaceTab === 'abnormal' ? 'bg-white shadow text-gray-900' : 'text-gray-500'" @click="handleSpaceTabChange('abnormal')">异常空间</button>
+          </div>
+        </div>
+        <div v-if="displayedAccounts.length === 0" class="px-6 py-12 text-center text-gray-500">
+          当前筛选下暂无账号，请切换标签查看。
+        </div>
+
         <!-- Desktop Table -->
-        <div class="hidden md:block overflow-x-auto">
+        <div v-else class="hidden md:block overflow-x-auto">
           <table class="w-full">
             <thead>
               <tr class="border-b border-gray-100 bg-gray-50/50">
                 <th class="px-6 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">ID</th>
+                <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">排序</th>
                 <th class="px-6 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">邮箱</th>
                 <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">已加入</th>
                 <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">待加入</th>
                 <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">降级</th>
+                <th class="px-6 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">空间状态</th>
                 <th class="px-6 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">过期时间</th>
                 <th class="px-6 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">创建时间</th>
                 <th class="px-6 py-5 text-right text-xs font-semibold text-gray-400 uppercase tracking-wider">操作</th>
@@ -1000,11 +1108,17 @@ const handleInviteSubmit = async () => {
             </thead>
             <tbody class="divide-y divide-gray-50">
               <tr
-                v-for="account in accounts"
+                v-for="account in displayedAccounts"
                 :key="account.id"
                 class="group hover:bg-blue-50/30 transition-colors duration-200"
               >
                 <td class="px-6 py-5 text-sm font-medium text-blue-500">#{{ account.id }}</td>
+                <td class="px-6 py-5">
+                  <div class="flex items-center justify-center gap-1">
+                    <Button size="icon" variant="ghost" class="h-7 w-7" @click="handleMoveAccount(account, 'up')"><ArrowUp class="w-3.5 h-3.5" /></Button>
+                    <Button size="icon" variant="ghost" class="h-7 w-7" @click="handleMoveAccount(account, 'down')"><ArrowDown class="w-3.5 h-3.5" /></Button>
+                  </div>
+                </td>
 	                <td class="px-6 py-5">
 	                  <div class="flex items-center gap-3">
 	                    <div class="w-8 h-8 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center text-xs font-bold text-gray-600">
@@ -1036,8 +1150,18 @@ const handleInviteSubmit = async () => {
                     {{ account.isDemoted ? '已降级' : '未降级' }}
                   </span>
                 </td>
-                <td class="px-6 py-5 text-sm text-gray-500 font-mono">{{ account.expireAt || '-' }}</td>
-                <td class="px-6 py-5 text-sm text-gray-500">{{ formatShanghaiDate(account.createdAt, dateFormatOptions) }}</td>
+                <td class="px-6 py-5">
+                  <span
+                    class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium"
+                    :class="resolveAccountStatus(account).code === 'normal' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'"
+                  >
+                    <CheckCircle2 v-if="resolveAccountStatus(account).code === 'normal'" class="w-3.5 h-3.5" />
+                    <AlertCircle v-else class="w-3.5 h-3.5" />
+                    {{ resolveAccountStatus(account).reason }}
+                  </span>
+                </td>
+                <td class="px-6 py-5 text-sm text-gray-500 font-mono">{{ account.expireAt ? formatShanghaiDate(account.expireAt, dateFormatOptions) : '-' }}</td>
+                <td class="px-6 py-5 text-sm text-gray-500">{{ formatShanghaiDate(account.createdAt, dateFormatOptions).split(" ")[0] }}</td>
                 <td class="px-6 py-5 text-right">
                   <div class="flex items-center justify-end gap-1">
                     <!-- Toggle Open -->
@@ -1067,6 +1191,14 @@ const handleInviteSubmit = async () => {
                       title="同步数据"
                     >
                       <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': syncingAccountId === account.id }" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      class="h-8 rounded-lg"
+                      @click="handleShowMembers(account)"
+                    >
+                      <Users class="w-3.5 h-3.5 mr-1" />成员
                     </Button>
 
                     <!-- Ban -->
@@ -1113,7 +1245,7 @@ const handleInviteSubmit = async () => {
 
         <!-- Mobile Card List -->
         <div class="md:hidden p-4 space-y-4 bg-gray-50/50">
-          <div v-for="account in accounts" :key="account.id" class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+          <div v-for="account in displayedAccounts" :key="account.id" class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
             <div class="flex items-start justify-between mb-4">
               <div class="flex items-center gap-3">
                  <div class="w-10 h-10 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center text-sm font-bold text-gray-600">
@@ -1137,13 +1269,14 @@ const handleInviteSubmit = async () => {
                  >
                    {{ account.isDemoted ? '已降级' : '未降级' }}
                  </span>
+                 <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border" :class="resolveAccountStatus(account).code === 'normal' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-red-50 text-red-700 border-red-100'">{{ resolveAccountStatus(account).reason }}</span>
               </div>
             </div>
 
             <div class="grid grid-cols-2 gap-4 text-xs text-gray-500 mb-4 bg-gray-50/50 p-3 rounded-xl">
           <div>
                   <p class="mb-1 text-gray-400">过期时间</p>
-                  <p class="font-mono text-gray-700">{{ account.expireAt || '-' }}</p>
+                  <p class="font-mono text-gray-700">{{ account.expireAt ? formatShanghaiDate(account.expireAt, dateFormatOptions) : '-' }}</p>
                </div>
                <div>
                   <p class="mb-1 text-gray-400">创建时间</p>
@@ -1177,6 +1310,7 @@ const handleInviteSubmit = async () => {
                   <Button size="icon" variant="ghost" class="h-9 w-9 text-gray-400" @click="handleSyncUserCount(account)">
                      <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': syncingAccountId === account.id }" />
                   </Button>
+                  <Button size="sm" variant="outline" class="h-9" @click="handleShowMembers(account)">成员</Button>
                   <Button size="icon" variant="ghost" class="h-9 w-9 text-gray-400"@click="openEditDialog(account)">
                      <FilePenLine class="w-4 h-4" />
                   </Button>
