@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { authService, gptAccountService, openaiOAuthService, userService, type GptAccount, type CreateGptAccountDto, type SyncUserCountResponse, type GptAccountsListParams, type ChatgptAccountInviteItem, type ChatgptAccountCheckInfo, type OpenAIOAuthSession, type OpenAIOAuthExchangeResult } from '@/services/api'
+import { authService, gptAccountService, openaiOAuthService, userService, type GptAccount, type CreateGptAccountDto, type SyncUserCountResponse, type GptAccountsListParams, type ChatgptAccountInviteItem, type ChatgptAccountUser, type ChatgptAccountCheckInfo, type OpenAIOAuthSession, type OpenAIOAuthExchangeResult } from '@/services/api'
 import { formatShanghaiDate } from '@/lib/datetime'
 import { useAppConfigStore } from '@/stores/appConfig'
 import {
@@ -134,6 +134,8 @@ const formatExpireAtDisplay = (expireAt?: string | null) => {
     return formatShanghaiDate(new Date(iso), { locale: appConfigStore.locale, timeZone: 'Asia/Shanghai' })
   }
   return formatShanghaiDate(raw, { locale: appConfigStore.locale, timeZone: 'Asia/Shanghai' })
+}
+
 const checkingAccessToken = ref(false)
 const checkedChatgptAccounts = ref<ChatgptAccountCheckInfo[]>([])
 const checkAccessTokenError = ref('')
@@ -656,6 +658,10 @@ watch(
   () => formData.value.expireAt,
   () => {
     expireAtManuallyEdited.value = Boolean(formData.value.expireAt)
+  }
+)
+
+watch(
   () => formData.value.chatgptAccountId,
   (nextValue) => {
     applyCheckedAccountSelection(String(nextValue || ''))
