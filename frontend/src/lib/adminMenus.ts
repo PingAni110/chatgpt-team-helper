@@ -51,6 +51,7 @@ const ICONS_BY_MENU_KEY: Record<string, any> = {
   xhs_orders: Package,
   xianyu_orders: Package,
   purchase_orders: CreditCard,
+  product_management: CreditCard,
   credit_orders: Coins,
   order_management: ShoppingCart,
   waiting_room: Train,
@@ -154,6 +155,7 @@ export const filterAdminMenuTreeByFeatureFlags = (tree: AdminMenuNode[], feature
     xhs_orders: 'xhs',
     xianyu_orders: 'xianyu',
     purchase_orders: 'payment',
+    product_management: 'payment',
     credit_orders: 'openAccounts'
   }
 

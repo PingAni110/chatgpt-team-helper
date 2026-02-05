@@ -50,7 +50,7 @@
                       ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20'
                       : 'bg-blue-500/10 text-[#007AFF] border-blue-500/20'"
                   >
-                    {{ plan.key === 'no_warranty' ? '无质保' : '质保' }}
+                    {{ plan.badge || (plan.key === 'no_warranty' ? '无质保' : '质保') }}
                   </span>
                 </div>
 
@@ -70,17 +70,9 @@
                 </div>
 
                 <ul class="space-y-3.5 text-[14px] text-[#1d1d1f]/70 dark:text-white/70 leading-relaxed">
-                  <li class="flex items-start gap-3">
-                    <span class="h-1.5 w-1.5 rounded-full bg-[#007AFF] mt-2 flex-shrink-0"></span>
-                    <span>{{ plan.key === 'no_warranty' ? '不支持退款 / 补号' : '支持退款 / 补号' }}</span>
-                  </li>
-                  <li class="flex items-start gap-3">
-                    <span class="h-1.5 w-1.5 rounded-full bg-[#007AFF] mt-2 flex-shrink-0"></span>
-                    <span>支付成功后系统自动处理</span>
-                  </li>
-                  <li v-if="plan.key === 'anti_ban'" class="flex items-start gap-3">
-                    <span class="h-1.5 w-1.5 rounded-full bg-red-600 mt-2 flex-shrink-0"></span>
-                    <span class="text-red-600 dark:text-red-400 font-semibold">经过特殊处理，无法退出工作空间，介意勿拍</span>
+                  <li v-for="(feature, idx) in (plan.features && plan.features.length ? plan.features : defaultFeatures(plan))" :key="`${plan.key}-${idx}`" class="flex items-start gap-3">
+                    <span class="h-1.5 w-1.5 rounded-full mt-2 flex-shrink-0" :class="feature.type === 'warn' ? 'bg-red-600' : 'bg-[#007AFF]'" ></span>
+                    <span :class="feature.type === 'warn' ? 'text-red-600 dark:text-red-400 font-semibold' : ''">{{ feature.text }}</span>
                   </li>
                 </ul>
               </div>
@@ -123,6 +115,27 @@ const plans = computed<PurchasePlan[]>(() => {
     return orderA - orderB
   })
 })
+
+
+const defaultFeatures = (plan: PurchasePlan) => {
+  if (plan.key === 'anti_ban') {
+    return [
+      { type: 'normal', text: '支持退款 / 补号' },
+      { type: 'normal', text: '支付成功后系统自动处理' },
+      { type: 'warn', text: '经过特殊处理，无法退出工作空间，介意勿拍' }
+    ]
+  }
+  if (plan.key === 'no_warranty') {
+    return [
+      { type: 'normal', text: '不支持退款 / 补号' },
+      { type: 'normal', text: '支付成功后系统自动处理' }
+    ]
+  }
+  return [
+    { type: 'normal', text: '支持退款 / 补号' },
+    { type: 'normal', text: '支付成功后系统自动处理' }
+  ]
+}
 
 const loadMeta = async () => {
   if (loading.value) return
