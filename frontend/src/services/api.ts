@@ -452,6 +452,7 @@ export interface PurchasePlan {
   badge?: string
   features?: PurchaseFeatureItem[]
   description?: string
+  purchaseNotes?: string[]
   status?: 'enabled' | 'disabled'
   sortOrder?: number
 }
@@ -501,6 +502,7 @@ export interface PurchaseAdminProductItem {
   badge: string
   features: PurchaseFeatureItem[]
   description?: string
+  purchaseNotes: string[]
   status: 'enabled' | 'disabled'
   sortOrder: number
   createdAt: string
@@ -524,6 +526,7 @@ export interface PurchaseAdminProductCreatePayload {
   badge: string
   features: PurchaseFeatureItem[]
   description?: string
+  purchaseNotes?: string[]
   status?: 'enabled' | 'disabled'
   sortOrder?: number
 }

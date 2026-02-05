@@ -206,6 +206,20 @@ const parseFeatures = (input) => {
   return []
 }
 
+const parsePurchaseNotes = (input) => {
+  if (Array.isArray(input)) {
+    return input.map(item => String(item || '').trim()).filter(Boolean)
+  }
+  const raw = String(input || '').trim()
+  if (!raw) return []
+
+  // 兼容旧字段：按换行/项目符号拆分
+  return raw
+    .split(/\n|\r\n|•|·|；|;/g)
+    .map(item => String(item || '').trim())
+    .filter(Boolean)
+}
+
 const normalizeFeatureItem = (item) => {
   const text = String(item?.text ?? '').trim()
   if (!text) return null
@@ -227,6 +241,12 @@ const buildDefaultManagedProducts = () => {
         { type: 'normal', text: '支持退款 / 补号' },
         { type: 'normal', text: '支付成功后系统自动处理' }
       ],
+      purchaseNotes: [
+        '质保：支持退款 / 补号（按平台规则处理）。',
+        '订单信息将发送至填写邮箱，请确认可正常收信。',
+        '支付成功后系统自动处理，无需手动兑换。',
+        '如未收到邮件请检查垃圾箱，或使用“查询订单”页。'
+      ],
       description: '',
       status: 'enabled',
       isDeleted: false,
@@ -246,6 +266,12 @@ const buildDefaultManagedProducts = () => {
         { type: 'normal', text: '支付成功后系统自动处理' },
         { type: 'warn', text: '经过特殊处理，无法退出工作空间，介意勿拍' }
       ],
+      purchaseNotes: [
+        '经过特殊处理：开通后无法退出工作空间。',
+        '质保：支持退款 / 补号（按平台规则处理）。',
+        '订单信息将发送至填写邮箱，请确认可正常收信。',
+        '支付成功后系统自动处理，无需手动兑换。'
+      ],
       description: '',
       status: 'enabled',
       isDeleted: false,
@@ -263,6 +289,12 @@ const buildDefaultManagedProducts = () => {
       features: [
         { type: 'normal', text: '不支持退款 / 补号' },
         { type: 'normal', text: '支付成功后系统自动处理' }
+      ],
+      purchaseNotes: [
+        '无质保：不支持退款 / 补号。',
+        '订单信息将发送至填写邮箱，请确认可正常收信。',
+        '支付成功后系统自动处理，无需手动兑换。',
+        '如未收到邮件请检查垃圾箱，或使用“查询订单”页。'
       ],
       description: '',
       status: 'enabled',
@@ -283,6 +315,7 @@ const normalizeManagedProduct = (raw, fallbackId) => {
   const badge = String(raw?.badge || '').trim() || (orderType === ORDER_TYPE_NO_WARRANTY ? '无质保' : '质保')
   const features = parseFeatures(raw?.features).map(normalizeFeatureItem).filter(Boolean)
   const description = String(raw?.description || '').trim()
+  const purchaseNotes = parsePurchaseNotes(raw?.purchaseNotes ?? raw?.purchase_notes ?? raw?.purchaseNoticeText ?? raw?.purchase_notice_text)
   const status = String(raw?.status || '').trim() === 'disabled' ? 'disabled' : 'enabled'
   const isDeleted = Boolean(raw?.isDeleted || raw?.is_deleted)
   const sortOrder = Math.max(0, toInt(raw?.sortOrder ?? raw?.sort_order, fallbackId))
@@ -298,6 +331,7 @@ const normalizeManagedProduct = (raw, fallbackId) => {
     badge,
     features,
     description,
+    purchaseNotes,
     status,
     isDeleted,
     sortOrder,
@@ -367,6 +401,7 @@ const toPlanFromManagedProduct = (item, availableCount, antiBanAvailableCount) =
   badge: item.badge,
   features: item.features,
   description: item.description,
+  purchaseNotes: item.purchaseNotes || [],
   status: item.status,
   sortOrder: item.sortOrder
 })
@@ -1394,13 +1429,14 @@ router.post('/admin/products', authenticateToken, requireMenu('product_managemen
     const badge = String(req.body?.badge || '').trim() || (orderType === ORDER_TYPE_NO_WARRANTY ? '无质保' : '质保')
     const features = parseFeatures(req.body?.features).map(normalizeFeatureItem).filter(Boolean)
     const description = String(req.body?.description || '').trim()
+    const purchaseNotes = parsePurchaseNotes(req.body?.purchaseNotes)
     const status = String(req.body?.status || '').trim() === 'disabled' ? 'disabled' : 'enabled'
     const sortOrder = Math.max(0, toInt(req.body?.sortOrder, nextId))
 
     if (!title) return res.status(400).json({ error: '商品名称不能为空' })
     if (!price || Number(price) < 0) return res.status(400).json({ error: '价格必须为非负数' })
 
-    const item = normalizeManagedProduct({ id: nextId, title, price, durationDays, orderType, badge, features, description, status, sortOrder, createdAt: now, updatedAt: now }, nextId)
+    const item = normalizeManagedProduct({ id: nextId, title, price, durationDays, orderType, badge, features, description, purchaseNotes, status, sortOrder, createdAt: now, updatedAt: now }, nextId)
     const saved = persistManagedProducts(db, [...list, item])
     const created = saved.find(x => Number(x.id) === item.id) || item
 
@@ -1429,13 +1465,14 @@ router.put('/admin/products/:id', authenticateToken, requireMenu('product_manage
     const badge = String((req.body?.badge ?? current.badge) || '').trim() || (orderType === ORDER_TYPE_NO_WARRANTY ? '无质保' : '质保')
     const features = parseFeatures(req.body?.features ?? current.features).map(normalizeFeatureItem).filter(Boolean)
     const description = String((req.body?.description ?? current.description) || '').trim()
+    const purchaseNotes = parsePurchaseNotes(req.body?.purchaseNotes ?? current.purchaseNotes)
     const status = String((req.body?.status ?? current.status) || '').trim() === 'disabled' ? 'disabled' : 'enabled'
     const sortOrder = Math.max(0, toInt(req.body?.sortOrder ?? current.sortOrder, current.sortOrder || id))
 
     if (!title) return res.status(400).json({ error: '商品名称不能为空' })
     if (!price || Number(price) < 0) return res.status(400).json({ error: '价格必须为非负数' })
 
-    list[index] = normalizeManagedProduct({ ...current, title, price, durationDays, orderType, badge, features, description, status, sortOrder, updatedAt: new Date().toISOString() }, id)
+    list[index] = normalizeManagedProduct({ ...current, title, price, durationDays, orderType, badge, features, description, purchaseNotes, status, sortOrder, updatedAt: new Date().toISOString() }, id)
     const saved = persistManagedProducts(db, list)
     res.json({ item: saved.find(item => Number(item.id) === id) || list[index] })
   } catch (error) {

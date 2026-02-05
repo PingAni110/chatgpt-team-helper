@@ -30,7 +30,8 @@ const form = ref({
   description: '',
   status: 'enabled' as 'enabled' | 'disabled',
   sortOrder: 0,
-  featuresText: '支持退款 / 补号\n支付成功后系统自动处理'
+  featuresText: '支持退款 / 补号\n支付成功后系统自动处理',
+  purchaseNotesText: '质保：支持退款 / 补号（按平台规则处理）。\n订单信息将发送至填写邮箱，请确认可正常收信。\n支付成功后系统自动处理，无需手动兑换。'
 })
 
 const parseFeatures = (value: string): PurchaseFeatureItem[] => {
@@ -62,7 +63,8 @@ const resetForm = () => {
     description: '',
     status: 'enabled',
     sortOrder: 0,
-    featuresText: '支持退款 / 补号\n支付成功后系统自动处理'
+    featuresText: '支持退款 / 补号\n支付成功后系统自动处理',
+    purchaseNotesText: '质保：支持退款 / 补号（按平台规则处理）。\n订单信息将发送至填写邮箱，请确认可正常收信。\n支付成功后系统自动处理，无需手动兑换。'
   }
 }
 
@@ -104,7 +106,8 @@ const openEdit = (item: PurchaseAdminProductItem) => {
     description: item.description || '',
     status: item.status,
     sortOrder: item.sortOrder,
-    featuresText: stringifyFeatures(item.features)
+    featuresText: stringifyFeatures(item.features),
+    purchaseNotesText: (item.purchaseNotes || []).join('\n')
   }
   showDialog.value = true
 }
@@ -119,7 +122,8 @@ const saveProduct = async () => {
     description: form.value.description.trim(),
     status: form.value.status,
     sortOrder: Number(form.value.sortOrder || 0),
-    features: parseFeatures(form.value.featuresText)
+    features: parseFeatures(form.value.featuresText),
+    purchaseNotes: String(form.value.purchaseNotesText || '').split('\n').map(line => line.trim()).filter(Boolean)
   }
 
   if (!payload.title) return showErrorToast('商品名称不能为空')
@@ -305,6 +309,10 @@ onMounted(() => {
           <div class="col-span-2">
             <div class="text-sm mb-1">卖点（每行一条，红点请以 ! 开头）</div>
             <textarea v-model="form.featuresText" class="w-full min-h-28 border rounded-md px-3 py-2 text-sm"></textarea>
+          </div>
+          <div class="col-span-2">
+            <div class="text-sm mb-1">购买须知（每行一条，详情页完整展示，列表页仅显示前三条）</div>
+            <textarea v-model="form.purchaseNotesText" class="w-full min-h-28 border rounded-md px-3 py-2 text-sm"></textarea>
           </div>
           <div class="col-span-2">
             <div class="text-sm mb-1">备注</div>

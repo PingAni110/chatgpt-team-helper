@@ -70,9 +70,9 @@
                 </div>
 
                 <ul class="space-y-3.5 text-[14px] text-[#1d1d1f]/70 dark:text-white/70 leading-relaxed">
-                  <li v-for="(feature, idx) in (plan.features && plan.features.length ? plan.features : defaultFeatures(plan))" :key="`${plan.key}-${idx}`" class="flex items-start gap-3">
-                    <span class="h-1.5 w-1.5 rounded-full mt-2 flex-shrink-0" :class="feature.type === 'warn' ? 'bg-red-600' : 'bg-[#007AFF]'" ></span>
-                    <span :class="feature.type === 'warn' ? 'text-red-600 dark:text-red-400 font-semibold' : ''">{{ feature.text }}</span>
+                  <li v-for="(note, idx) in resolveCardNotes(plan)" :key="`${plan.key}-${idx}`" class="flex items-start gap-3">
+                    <span class="h-1.5 w-1.5 rounded-full mt-2 flex-shrink-0 bg-[#007AFF]" ></span>
+                    <span>{{ note }}</span>
                   </li>
                 </ul>
               </div>
@@ -117,24 +117,24 @@ const plans = computed<PurchasePlan[]>(() => {
 })
 
 
-const defaultFeatures = (plan: PurchasePlan) => {
+const resolveCardNotes = (plan: PurchasePlan): string[] => {
+  const notes = Array.isArray(plan.purchaseNotes)
+    ? plan.purchaseNotes.map(item => String(item || '').trim()).filter(Boolean)
+    : []
+  if (notes.length > 0) return notes.slice(0, 3)
+
+  const fallbackFeatures = Array.isArray(plan.features)
+    ? plan.features.map(item => String(item?.text || '').trim()).filter(Boolean)
+    : []
+  if (fallbackFeatures.length > 0) return fallbackFeatures.slice(0, 3)
+
   if (plan.key === 'anti_ban') {
-    return [
-      { type: 'normal', text: '支持退款 / 补号' },
-      { type: 'normal', text: '支付成功后系统自动处理' },
-      { type: 'warn', text: '经过特殊处理，无法退出工作空间，介意勿拍' }
-    ]
+    return ['支持退款 / 补号', '支付成功后系统自动处理', '经过特殊处理，无法退出工作空间，介意勿拍']
   }
   if (plan.key === 'no_warranty') {
-    return [
-      { type: 'normal', text: '不支持退款 / 补号' },
-      { type: 'normal', text: '支付成功后系统自动处理' }
-    ]
+    return ['不支持退款 / 补号', '支付成功后系统自动处理']
   }
-  return [
-    { type: 'normal', text: '支持退款 / 补号' },
-    { type: 'normal', text: '支付成功后系统自动处理' }
-  ]
+  return ['支持退款 / 补号', '支付成功后系统自动处理']
 }
 
 const loadMeta = async () => {
