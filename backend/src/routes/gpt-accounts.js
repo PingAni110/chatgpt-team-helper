@@ -47,7 +47,46 @@ const normalizeExpireAt = (value) => {
     }
   }
 
+  const parsed = new Date(raw)
+  if (!Number.isNaN(parsed.getTime())) {
+    return formatExpireAt(parsed)
+  }
+
   return null
+}
+
+const safeFormatExpireAtOutput = (value) => {
+  try {
+    return formatExpireAtOutput(value)
+  } catch (error) {
+    console.error('Format expireAt output error:', error)
+    return null
+  }
+}
+
+const mapAccountRow = (row) => {
+  try {
+    return {
+      id: row[0],
+      email: row[1],
+      token: row[2],
+      refreshToken: row[3],
+      userCount: row[4],
+      inviteCount: row[5],
+      chatgptAccountId: row[6],
+      oaiDeviceId: row[7],
+      expireAt: safeFormatExpireAtOutput(row[8]),
+      sortOrder: row[9] ?? 0,
+      isOpen: Boolean(row[10]),
+      isDemoted: Boolean(row[11]),
+      isBanned: Boolean(row[12]),
+      createdAt: row[13],
+      updatedAt: row[14]
+    }
+  } catch (error) {
+    console.error('Map account row error:', error)
+    return null
+  }
 }
 
 const collectEmails = (payload) => {
@@ -166,23 +205,9 @@ router.get('/', async (req, res) => {
 	      LIMIT ? OFFSET ?
 	    `, [...params, pageSize, offset])
 
-	    const accounts = (dataResult[0]?.values || []).map(row => ({
-	      id: row[0],
-	      email: row[1],
-	      token: row[2],
-	      refreshToken: row[3],
-	      userCount: row[4],
-	      inviteCount: row[5],
-	      chatgptAccountId: row[6],
-	      oaiDeviceId: row[7],
-	      expireAt: formatExpireAtOutput(row[8]),
-	      sortOrder: row[9] ?? 0,
-	      isOpen: Boolean(row[10]),
-	      isDemoted: Boolean(row[11]),
-	      isBanned: Boolean(row[12]),
-	      createdAt: row[13],
-	      updatedAt: row[14]
-	    }))
+	    const accounts = (dataResult[0]?.values || [])
+	      .map(mapAccountRow)
+	      .filter(Boolean)
 
     res.json({
       accounts,
@@ -333,23 +358,11 @@ router.get('/:id', async (req, res) => {
     }
 
     const row = result[0].values[0]
-	    const account = {
-	      id: row[0],
-	      email: row[1],
-	      token: row[2],
-	      refreshToken: row[3],
-	      userCount: row[4],
-		      inviteCount: row[5],
-		      chatgptAccountId: row[6],
-		      oaiDeviceId: row[7],
-		      expireAt: formatExpireAtOutput(row[8]),
-		      sortOrder: row[9] ?? 0,
-		      isOpen: Boolean(row[10]),
-		      isDemoted: Boolean(row[11]),
-		      isBanned: Boolean(row[12]),
-		      createdAt: row[13],
-		      updatedAt: row[14]
-		    }
+    const account = mapAccountRow(row)
+
+    if (!account) {
+      return res.status(500).json({ error: 'Account data parse failed' })
+    }
 
     res.json(account)
   } catch (error) {
@@ -402,11 +415,12 @@ router.post('/', async (req, res) => {
     const db = await getDatabase()
 
     // 设置默认人数为1而不是0
-    const finalUserCount = userCount !== undefined ? userCount : 1
+    const parsedUserCount = Number(userCount)
+    const finalUserCount = Number.isFinite(parsedUserCount) ? Math.max(1, parsedUserCount) : 1
 
     db.run(
       `INSERT INTO gpt_accounts (email, token, refresh_token, user_count, chatgpt_account_id, oai_device_id, expire_at, sort_order, is_demoted, is_banned, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM gpt_accounts), ?, ?, DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))`,
       [normalizedEmail, token, refreshToken || null, finalUserCount, normalizedChatgptAccountId, normalizedOaiDeviceId || null, finalExpireAt, isDemotedValue, isBannedValue]
     )
 
@@ -420,23 +434,11 @@ router.post('/', async (req, res) => {
 		      WHERE id = last_insert_rowid()
 		    `)
     const row = accountResult[0].values[0]
-	    const account = {
-	      id: row[0],
-	      email: row[1],
-	      token: row[2],
-	      refreshToken: row[3],
-	      userCount: row[4],
-		      inviteCount: row[5],
-		      chatgptAccountId: row[6],
-		      oaiDeviceId: row[7],
-		      expireAt: formatExpireAtOutput(row[8]),
-		      sortOrder: row[9] ?? 0,
-		      isOpen: Boolean(row[10]),
-		      isDemoted: Boolean(row[11]),
-		      isBanned: Boolean(row[12]),
-		      createdAt: row[13],
-		      updatedAt: row[14]
-		    }
+    const account = mapAccountRow(row)
+
+    if (!account) {
+      return res.status(500).json({ error: 'Account data parse failed' })
+    }
 
     // 生成随机兑换码的辅助函数
     function generateRedemptionCode(length = 12) {
@@ -452,8 +454,7 @@ router.post('/', async (req, res) => {
       return code
     }
 
-    const totalCapacity = 5
-    const availableSlots = Math.max(0, totalCapacity - Math.max(0, finalUserCount))
+    const availableSlots = Math.max(1, Math.floor(finalUserCount))
 
     // 自动生成兑换码并绑定到该账号
     const generatedCodes = []
@@ -608,23 +609,11 @@ router.put('/:id', async (req, res) => {
 		      WHERE id = ?
 		    `, [req.params.id])
     const row = result[0].values[0]
-	    const account = {
-	      id: row[0],
-	      email: row[1],
-	      token: row[2],
-	      refreshToken: row[3],
-	      userCount: row[4],
-		      inviteCount: row[5],
-		      chatgptAccountId: row[6],
-		      oaiDeviceId: row[7],
-		      expireAt: formatExpireAtOutput(row[8]),
-		      sortOrder: row[9] ?? 0,
-		      isOpen: Boolean(row[10]),
-		      isDemoted: Boolean(row[11]),
-		      isBanned: Boolean(row[12]),
-		      createdAt: row[13],
-		      updatedAt: row[14]
-		    }
+    const account = mapAccountRow(row)
+
+    if (!account) {
+      return res.status(500).json({ error: 'Account data parse failed' })
+    }
 
     res.json(account)
   } catch (error) {

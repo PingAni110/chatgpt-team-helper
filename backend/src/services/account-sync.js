@@ -3,6 +3,15 @@ import axios from 'axios'
 import { loadProxyList, parseProxyConfig } from '../utils/proxy.js'
 import { formatExpireAtOutput } from '../utils/expire-at.js'
 
+const safeFormatExpireAtOutput = (value) => {
+  try {
+    return formatExpireAtOutput(value)
+  } catch (error) {
+    console.error('Format expireAt output error:', error)
+    return null
+  }
+}
+
 export class AccountSyncError extends Error {
   constructor(message, status = 500) {
     super(message)
@@ -68,22 +77,27 @@ const resolveRequestProxy = (proxy) => {
 }
 
 function mapRowToAccount(row) {
-  return {
-    id: row[0],
-    email: row[1],
-    token: row[2],
-    refreshToken: row[3],
-    userCount: row[4],
-    inviteCount: row[5],
-    chatgptAccountId: row[6],
-    oaiDeviceId: row[7],
-    expireAt: formatExpireAtOutput(row[8]),
-    sortOrder: row[9] ?? 0,
-    isOpen: Boolean(row[10]),
-    isDemoted: Boolean(row[11]),
-    isBanned: Boolean(row[12]),
-    createdAt: row[13],
-    updatedAt: row[14]
+  try {
+    return {
+      id: row[0],
+      email: row[1],
+      token: row[2],
+      refreshToken: row[3],
+      userCount: row[4],
+      inviteCount: row[5],
+      chatgptAccountId: row[6],
+      oaiDeviceId: row[7],
+      expireAt: safeFormatExpireAtOutput(row[8]),
+      sortOrder: row[9] ?? 0,
+      isOpen: Boolean(row[10]),
+      isDemoted: Boolean(row[11]),
+      isBanned: Boolean(row[12]),
+      createdAt: row[13],
+      updatedAt: row[14]
+    }
+  } catch (error) {
+    console.error('Map account row error:', error)
+    return null
   }
 }
 
@@ -122,7 +136,7 @@ export async function fetchAllAccounts() {
     return []
   }
 
-  return result[0].values.map(mapRowToAccount)
+  return result[0].values.map(mapRowToAccount).filter(Boolean)
 }
 
 function buildHeaders(account) {
