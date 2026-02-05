@@ -1,26 +1,60 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { authService } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 const router = useRouter()
+const route = useRoute()
 const username = ref('')
 const password = ref('')
-const error = ref('')
+const errorMsg = ref('')
 const loading = ref(false)
 
+watch([username, password], () => {
+  if (errorMsg.value) {
+    errorMsg.value = ''
+  }
+})
+
+const resolveLoginError = (err: any): string => {
+  const status = Number(err?.response?.status || 0)
+  const backendMessage = String(err?.response?.data?.error || err?.response?.data?.message || '').trim()
+
+  if (backendMessage) {
+    if (status === 401) return `账号或密码错误：${backendMessage}`
+    if (status === 403) return `登录被拒绝：${backendMessage}`
+    return backendMessage
+  }
+
+  if (status === 401) return '账号或密码错误，请检查后重试'
+  if (status === 403) return '当前账号无登录权限（403）'
+  if (status >= 500) return '服务器暂时不可用，请稍后再试'
+  return err?.message || '登录失败，请重试'
+}
+
 const handleLogin = async () => {
-  error.value = ''
+  const identifier = username.value.trim()
+  if (!identifier || !password.value) {
+    errorMsg.value = '请输入账号和密码'
+    return
+  }
+
+  errorMsg.value = ''
   loading.value = true
 
   try {
-    await authService.login(username.value, password.value)
-    router.push('/admin')
+    // 后端接口约定：POST /auth/login，payload 字段名为 { username, password }
+    await authService.login(identifier, password.value)
+
+    // 登录后 token/user 已由 authService 写入 localStorage。
+    // 支持登录后回跳：/login?redirect=/admin/accounts
+    const redirectTarget = String(route.query.redirect || '').trim()
+    await router.replace(redirectTarget || '/admin')
   } catch (err: any) {
-    error.value = err.response?.data?.error || '登录失败，请重试'
+    errorMsg.value = resolveLoginError(err)
   } finally {
     loading.value = false
   }
@@ -65,8 +99,8 @@ const handleLogin = async () => {
             />
           </div>
 
-     <div class="space-y-2">
-             <div class="flex items-center justify-between">
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
               <Label for="password" class="text-xs font-medium text-gray-500 ml-1 uppercase tracking-wider">密码</Label>
             </div>
             <Input
@@ -79,8 +113,8 @@ const handleLogin = async () => {
             />
           </div>
 
-          <div v-if="error" class="text-sm text-red-500 bg-red-50/80 border border-red-100 rounded-xl px-4 py-3 animate-in fade-in slide-in-from-bottom-2">
-            {{ error }}
+          <div v-if="errorMsg" class="text-sm text-red-500 bg-red-50/80 border border-red-100 rounded-xl px-4 py-3 animate-in fade-in slide-in-from-bottom-2">
+            {{ errorMsg }}
           </div>
 
           <Button 
