@@ -212,6 +212,16 @@ const router = createRouter({
           meta: { requiredMenuKeys: ['product_management', 'purchase_orders'], featureKey: 'payment' },
         },
         {
+          path: 'products',
+          name: 'product-management-legacy-products',
+          redirect: { name: 'product-management' },
+        },
+        {
+          path: 'product',
+          name: 'product-management-legacy-product',
+          redirect: { name: 'product-management' },
+        },
+        {
           path: 'credit-orders',
           name: 'credit-orders',
           component: CreditOrdersView,

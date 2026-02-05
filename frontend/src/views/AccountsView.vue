@@ -520,7 +520,15 @@ const loadAccounts = async () => {
       params.openStatus = openStatusFilter.value
     }
     const response = await gptAccountService.getAll(params)
-    accounts.value = response.accounts || []
+    const normalizedAccounts = (response.accounts || []).map((item: any) => {
+      const source = item && typeof item === 'object' ? item : {}
+      const expireAt = source.expireAt ?? source.expire_at ?? source.expireTime ?? source.expire_time ?? source.expiresAt ?? null
+      return {
+        ...source,
+        expireAt: expireAt == null ? null : String(expireAt),
+      }
+    })
+    accounts.value = normalizedAccounts
     paginationMeta.value = response.pagination || { page: 1, pageSize: 10, total: 0 }
   } catch (err: any) {
     error.value = err.response?.data?.error || 'Failed to load accounts'
@@ -534,11 +542,10 @@ const loadAccounts = async () => {
 }
 
 // 搜索处理
-const handleSpaceTabChange = async (tab: 'normal' | 'abnormal') => {
+const handleSpaceTabChange = (tab: 'normal' | 'abnormal') => {
   if (activeSpaceTab.value === tab) return
   activeSpaceTab.value = tab
   paginationMeta.value.page = 1
-  await loadAccounts()
 }
 
 const handleSearch = () => {
