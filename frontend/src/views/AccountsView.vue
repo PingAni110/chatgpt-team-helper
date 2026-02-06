@@ -1142,8 +1142,8 @@ const handleInviteSubmit = async () => {
             <SelectValue placeholder="空间类型" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="child">子号空间</SelectItem>
-            <SelectItem value="mother">母号空间</SelectItem>
+            <SelectItem value="child">子号</SelectItem>
+            <SelectItem value="mother">母号</SelectItem>
           </SelectContent>
         </Select>
       </div>
