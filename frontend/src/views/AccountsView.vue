@@ -6,6 +6,19 @@ import { formatShanghaiDate } from '@/lib/datetime'
 import { useAppConfigStore } from '@/stores/appConfig'
 import { buildSpaceTabQuery, createRequestGuard, readSpaceTabStorage, resolveInitialSpaceTab, resolveSpaceTab, writeSpaceTabStorage } from '@/lib/accounts-view-state'
 import {
+  buildSpaceTabQuery,
+  buildSpaceTypeQuery,
+  createRequestGuard,
+  readSpaceTabStorage,
+  readSpaceTypeStorage,
+  resolveInitialSpaceTab,
+  resolveInitialSpaceType,
+  resolveSpaceTab,
+  resolveSpaceType,
+  writeSpaceTabStorage,
+  writeSpaceTypeStorage
+} from '@/lib/accounts-view-state'
+import {
   Card,
   CardContent,
   CardFooter,
@@ -88,10 +101,17 @@ onMounted(async () => {
     queryValue: route.query.spaceStatus,
     storedValue: readSpaceTabStorage()
   })
+  const initialSpaceType = resolveInitialSpaceType({
+    queryValue: route.query.spaceType,
+    storedValue: readSpaceTypeStorage()
+  })
   activeSpaceTab.value = initialTab
+  spaceTypeFilter.value = initialSpaceType
   writeSpaceTabStorage(initialTab)
-  if (route.query.spaceStatus !== initialTab) {
-    router.replace({ query: buildSpaceTabQuery(route.query, initialTab) })
+  writeSpaceTypeStorage(initialSpaceType)
+  const mergedQuery = buildSpaceTabQuery(buildSpaceTypeQuery(route.query, initialSpaceType), initialTab)
+  if (route.query.spaceStatus !== initialTab || route.query.spaceType !== initialSpaceType) {
+    router.replace({ query: mergedQuery })
   }
 
   await loadAccounts()
@@ -618,6 +638,8 @@ watch(spaceTypeFilter, () => {
     clearTimeout(searchDebounceTimer)
     searchDebounceTimer = null
   }
+  router.replace({ query: buildSpaceTypeQuery(route.query, spaceTypeFilter.value) })
+  writeSpaceTypeStorage(spaceTypeFilter.value)
   loadAccounts()
 })
 
@@ -639,6 +661,17 @@ watch(
     if (activeSpaceTab.value !== nextTab) {
       activeSpaceTab.value = nextTab
       writeSpaceTabStorage(nextTab)
+    }
+  }
+)
+
+watch(
+  () => route.query.spaceType,
+  (value) => {
+    const nextType = resolveSpaceType(value)
+    if (spaceTypeFilter.value !== nextType) {
+      spaceTypeFilter.value = nextType
+      writeSpaceTypeStorage(nextType)
     }
   }
 )

@@ -5,6 +5,9 @@ import { withLocks } from '../src/utils/locks.js'
 // 1. 创建空间后人数=1 -> 兑换码=4
 assert.equal(calcRedeemableSlots(1), 4)
 
+// 1.1 创建空间后人数=0 -> 兑换码=5
+assert.equal(calcRedeemableSlots(0), 5)
+
 // 2. 创建空间后人数=3 -> 兑换码=2
 assert.equal(calcRedeemableSlots(3), 2)
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { authService, purchaseService, type PurchaseAdminProductItem, type PurchaseFeatureItem, type PurchaseOrderType } from '@/services/api'
+import { authService, purchaseService, type PurchaseAdminProductItem, type PurchaseOrderType } from '@/services/api'
 import { useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,27 +30,8 @@ const form = ref({
   description: '',
   status: 'enabled' as 'enabled' | 'disabled',
   sortOrder: 0,
-  featuresText: '支持退款 / 补号\n支付成功后系统自动处理',
   purchaseNotesText: '质保：支持退款 / 补号（按平台规则处理）。\n订单信息将发送至填写邮箱，请确认可正常收信。\n支付成功后系统自动处理，无需手动兑换。'
 })
-
-const parseFeatures = (value: string): PurchaseFeatureItem[] => {
-  return String(value || '')
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      if (line.startsWith('!')) {
-        return { type: 'warn' as const, text: line.slice(1).trim() }
-      }
-      return { type: 'normal' as const, text: line }
-    })
-    .filter(item => item.text)
-}
-
-const stringifyFeatures = (features?: PurchaseFeatureItem[]) => {
-  return (features || []).map(item => item.type === 'warn' ? `!${item.text}` : item.text).join('\n')
-}
 
 const resetForm = () => {
   editingId.value = null
@@ -63,7 +44,6 @@ const resetForm = () => {
     description: '',
     status: 'enabled',
     sortOrder: 0,
-    featuresText: '支持退款 / 补号\n支付成功后系统自动处理',
     purchaseNotesText: '质保：支持退款 / 补号（按平台规则处理）。\n订单信息将发送至填写邮箱，请确认可正常收信。\n支付成功后系统自动处理，无需手动兑换。'
   }
 }
@@ -106,7 +86,6 @@ const openEdit = (item: PurchaseAdminProductItem) => {
     description: item.description || '',
     status: item.status,
     sortOrder: item.sortOrder,
-    featuresText: stringifyFeatures(item.features),
     purchaseNotesText: (item.purchaseNotes || []).join('\n')
   }
   showDialog.value = true
@@ -122,7 +101,6 @@ const saveProduct = async () => {
     description: form.value.description.trim(),
     status: form.value.status,
     sortOrder: Number(form.value.sortOrder || 0),
-    features: parseFeatures(form.value.featuresText),
     purchaseNotes: String(form.value.purchaseNotesText || '').split('\n').map(line => line.trim()).filter(Boolean)
   }
 
@@ -305,10 +283,6 @@ onMounted(() => {
           <div>
             <div class="text-sm mb-1">排序</div>
             <Input v-model.number="form.sortOrder" type="number" min="0" />
-          </div>
-          <div class="col-span-2">
-            <div class="text-sm mb-1">卖点（每行一条，红点请以 ! 开头）</div>
-            <textarea v-model="form.featuresText" class="w-full min-h-28 border rounded-md px-3 py-2 text-sm"></textarea>
           </div>
           <div class="col-span-2">
             <div class="text-sm mb-1">购买须知（每行一条，详情页完整展示，列表页仅显示前三条）</div>

@@ -2,6 +2,7 @@ import express from 'express'
 import { getDatabase, saveDatabase } from '../database/init.js'
 import { apiKeyAuth } from '../middleware/api-key-auth.js'
 import { syncAccountUserCount } from '../services/account-sync.js'
+import { SPACE_MEMBER_LIMIT } from '../utils/space-capacity.js'
 import { SPACE_TYPE_CHILD, shouldAutoGenerateCodes } from '../utils/space-type.js'
 
 const router = express.Router()
@@ -311,9 +312,10 @@ router.post('/', apiKeyAuth, async (req, res) => {
       }
 
       // 自动生成兑换码，数量为可用名额
-      // 可用名额 = 总容量(5) - 当前人数(1) - 所有兑换码数(0) = 4
-      const totalCapacity = 5
-      const currentUserCount = 1  // 刚创建的账号默认人数为1
+      // 可用名额 = 总容量(5) - 当前人数 - 所有兑换码数(0)
+      const totalCapacity = SPACE_MEMBER_LIMIT
+      const userSync = await syncAccountUserCount(account.id, { accountRecord: account, userListParams: { offset: 0, limit: 1, query: '' } })
+      const currentUserCount = Number(userSync?.syncedUserCount ?? account.userCount ?? 1)
       const allCodesCount = 0  // 新账号还没有任何兑换码
       const availableSlots = totalCapacity - currentUserCount - allCodesCount
       const shouldGenerateCodes = shouldAutoGenerateCodes(account.spaceType)

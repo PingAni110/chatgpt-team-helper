@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import {
   buildSpaceTabQuery,
+  buildSpaceTypeQuery,
   createRequestGuard,
   resolveInitialSpaceTab,
+  resolveInitialSpaceType,
   resolveSpaceTab
 } from '../src/lib/accounts-view-state.js'
 
@@ -17,6 +19,13 @@ assert.equal(resolveInitialSpaceTab({ queryValue: undefined, storedValue: undefi
 
 const query = buildSpaceTabQuery({ foo: 'bar' }, 'abnormal')
 assert.deepEqual(query, { foo: 'bar', spaceStatus: 'abnormal' })
+
+assert.equal(resolveInitialSpaceType({ queryValue: 'mother', storedValue: 'child' }), 'mother')
+assert.equal(resolveInitialSpaceType({ queryValue: undefined, storedValue: 'mother' }), 'mother')
+assert.equal(resolveInitialSpaceType({ queryValue: undefined, storedValue: undefined }), 'child')
+
+const typeQuery = buildSpaceTypeQuery({ foo: 'bar' }, 'mother')
+assert.deepEqual(typeQuery, { foo: 'bar', spaceType: 'mother' })
 
 const guard = createRequestGuard()
 const first = guard.nextId()

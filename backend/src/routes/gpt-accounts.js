@@ -7,6 +7,7 @@ import { requireMenu } from '../middleware/rbac.js'
 import { syncAccountUserCount, syncAccountInviteCount, fetchOpenAiAccountInfo, AccountSyncError, deleteAccountUser, inviteAccountUser, deleteAccountInvite } from '../services/account-sync.js'
 import { SPACE_MEMBER_LIMIT, calcRedeemableSlots, normalizeMemberCount } from '../utils/space-capacity.js'
 import { SPACE_TYPE_CHILD, normalizeSpaceType, shouldAutoGenerateCodes } from '../utils/space-type.js'
+import { withLocks } from '../utils/locks.js'
 
 const router = express.Router()
 const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
@@ -502,34 +503,55 @@ router.post('/', async (req, res) => {
         spaceType: spaceTypeValue
       })
     }
-    const codesToGenerate = shouldGenerateCodes ? calcRedeemableSlots(finalUserCount, SPACE_MEMBER_LIMIT) : 0
+
+    const syncResult = await syncAccountUserCount(account.id, {
+      accountRecord: {
+        ...account,
+        chatgptAccountId: normalizedChatgptAccountId,
+        token,
+        oaiDeviceId: normalizedOaiDeviceId || null
+      },
+      userListParams: { offset: 0, limit: 1, query: '' }
+    })
+    const joinedCount = Number(syncResult?.syncedUserCount ?? finalUserCount)
+    const codesToGenerate = shouldGenerateCodes ? calcRedeemableSlots(joinedCount, SPACE_MEMBER_LIMIT) : 0
 
     const generatedCodes = []
-    for (let i = 0; i < codesToGenerate; i++) {
-      let code = generateRedemptionCode()
-      let attempts = 0
-      let success = false
+    await withLocks([`redeem:${account.id}`], async () => {
+      for (let i = 0; i < codesToGenerate; i++) {
+        let code = generateRedemptionCode()
+        let attempts = 0
+        let success = false
 
-      // 尝试生成唯一的兑换码（最多重试5次）
-      while (attempts < 5 && !success) {
-        try {
-          db.run(
-            `INSERT INTO redemption_codes (code, account_email, created_at, updated_at) VALUES (?, ?, DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))`,
-            [code, normalizedEmail]
-          )
-          generatedCodes.push(code)
-          success = true
-        } catch (err) {
-          if (err.message.includes('UNIQUE')) {
-            // 如果重复，重新生成
-            code = generateRedemptionCode()
-            attempts++
-          } else {
-            throw err
+        // 尝试生成唯一的兑换码（最多重试5次）
+        while (attempts < 5 && !success) {
+          try {
+            db.run(
+              `INSERT INTO redemption_codes (code, account_email, created_at, updated_at) VALUES (?, ?, DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))`,
+              [code, normalizedEmail]
+            )
+            generatedCodes.push(code)
+            success = true
+          } catch (err) {
+            if (err.message.includes('UNIQUE')) {
+              // 如果重复，重新生成
+              code = generateRedemptionCode()
+              attempts++
+            } else {
+              throw err
+            }
           }
         }
       }
-    }
+    })
+
+    console.info('[GptAccounts] auto redemption summary', {
+      accountId: account.id,
+      joinedCount,
+      capacity: SPACE_MEMBER_LIMIT,
+      need: codesToGenerate,
+      generated: generatedCodes.length
+    })
 
     saveDatabase()
 
