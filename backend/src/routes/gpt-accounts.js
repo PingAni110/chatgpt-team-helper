@@ -6,6 +6,7 @@ import { apiKeyAuth } from '../middleware/api-key-auth.js'
 import { requireMenu } from '../middleware/rbac.js'
 import { syncAccountUserCount, syncAccountInviteCount, fetchOpenAiAccountInfo, AccountSyncError, deleteAccountUser, inviteAccountUser, deleteAccountInvite } from '../services/account-sync.js'
 import { SPACE_MEMBER_LIMIT, calcRedeemableSlots, normalizeMemberCount } from '../utils/space-capacity.js'
+import { SPACE_TYPE_CHILD, normalizeSpaceType, shouldAutoGenerateCodes } from '../utils/space-type.js'
 
 const router = express.Router()
 const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
@@ -77,6 +78,8 @@ const normalizeShanghaiDateTime = (value) => {
   if (normalized) return normalized
   return null
 }
+
+const normalizeSpaceTypeInput = (value, fallback = null) => normalizeSpaceType(value, fallback)
 
 const resolveSpaceStatus = (account) => {
   const statusCode = String(account?.spaceStatusCode || account?.space_status_code || '').trim().toLowerCase()
@@ -231,6 +234,12 @@ router.get('/', async (req, res) => {
     const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 10))
     const search = (req.query.search || '').trim().toLowerCase()
     const openStatus = req.query.openStatus // 'open' | 'closed' | undefined
+    const rawSpaceType = req.query.spaceType ?? req.query.space_type
+    const hasSpaceType = rawSpaceType != null && String(rawSpaceType).trim() !== ''
+    const normalizedSpaceType = hasSpaceType ? normalizeSpaceTypeInput(rawSpaceType, null) : null
+    if (hasSpaceType && !normalizedSpaceType) {
+      return res.status(400).json({ error: 'Invalid spaceType' })
+    }
 
     // 构建 WHERE 条件
     const conditions = []
@@ -246,6 +255,10 @@ router.get('/', async (req, res) => {
       conditions.push('is_open = 1')
     } else if (openStatus === 'closed') {
       conditions.push('(is_open = 0 OR is_open IS NULL)')
+    }
+    if (normalizedSpaceType) {
+      conditions.push(`COALESCE(space_type, '${SPACE_TYPE_CHILD}') = ?`)
+      params.push(normalizedSpaceType)
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
@@ -263,6 +276,7 @@ router.get('/', async (req, res) => {
                COALESCE(is_demoted, 0) AS is_demoted,
                COALESCE(is_banned, 0) AS is_banned,
                COALESCE(sort_order, id) AS sort_order,
+               COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
                COALESCE(space_status_code, 'normal') AS space_status_code,
                space_status_reason,
                created_at, updated_at
@@ -287,11 +301,12 @@ router.get('/', async (req, res) => {
     }
 
     const accounts = (dataResult[0]?.values || []).map(row => {
-      const hasStatusColumns = row.length >= 17
-      const spaceStatusCode = hasStatusColumns ? (row[13] || 'normal') : 'normal'
-      const spaceStatusReason = hasStatusColumns ? (row[14] || '') : ''
-      const createdAt = hasStatusColumns ? row[15] : row[13]
-      const updatedAt = hasStatusColumns ? row[16] : row[14]
+      const hasStatusColumns = row.length >= 18
+      const spaceType = hasStatusColumns ? (row[13] || SPACE_TYPE_CHILD) : SPACE_TYPE_CHILD
+      const spaceStatusCode = hasStatusColumns ? (row[14] || 'normal') : 'normal'
+      const spaceStatusReason = hasStatusColumns ? (row[15] || '') : ''
+      const createdAt = hasStatusColumns ? row[16] : row[13]
+      const updatedAt = hasStatusColumns ? row[17] : row[14]
 
       return {
         id: row[0],
@@ -307,6 +322,7 @@ router.get('/', async (req, res) => {
         isDemoted: Boolean(row[10]),
         isBanned: Boolean(row[11]),
         sortOrder: Number(row[12] || 0),
+        spaceType,
         spaceStatusCode,
         spaceStatusReason,
         createdAt,
@@ -338,6 +354,7 @@ router.get('/:id', async (req, res) => {
 	      SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
 	             COALESCE(is_demoted, 0) AS is_demoted,
 	             COALESCE(is_banned, 0) AS is_banned,
+	             COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
 	             created_at, updated_at
 	      FROM gpt_accounts
 	      WHERE id = ?
@@ -361,9 +378,10 @@ router.get('/:id', async (req, res) => {
 		      isOpen: Boolean(row[9]),
 		      isDemoted: Boolean(row[10]),
 		      isBanned: Boolean(row[11]),
-		      createdAt: row[12],
-		      updatedAt: row[13]
-		    }
+          spaceType: row[12] || SPACE_TYPE_CHILD,
+		      createdAt: row[13],
+		      updatedAt: row[14]
+	    }
 
     res.json(account)
   } catch (error) {
@@ -398,6 +416,14 @@ router.post('/', async (req, res) => {
     const normalizedOaiDeviceId = String(oaiDeviceId ?? '').trim()
     const normalizedExpireAt = normalizeShanghaiDateTime(expireAt)
 
+    const hasSpaceType = Object.prototype.hasOwnProperty.call(body, 'spaceType') || Object.prototype.hasOwnProperty.call(body, 'space_type')
+    const spaceTypeInput = Object.prototype.hasOwnProperty.call(body, 'spaceType') ? body.spaceType : body.space_type
+    const normalizedSpaceType = hasSpaceType ? normalizeSpaceTypeInput(spaceTypeInput, null) : null
+    if (hasSpaceType && !normalizedSpaceType) {
+      return res.status(400).json({ error: 'Invalid spaceType' })
+    }
+    const spaceTypeValue = normalizedSpaceType || SPACE_TYPE_CHILD
+
     if (!email || !token || !normalizedChatgptAccountId) {
       return res.status(400).json({ error: 'Email, token and ChatGPT ID are required' })
     }
@@ -420,8 +446,8 @@ router.post('/', async (req, res) => {
     }
 
     db.run(
-      `INSERT INTO gpt_accounts (email, token, refresh_token, user_count, chatgpt_account_id, oai_device_id, expire_at, is_demoted, is_banned, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))`,
-      [normalizedEmail, token, refreshToken || null, finalUserCount, normalizedChatgptAccountId, normalizedOaiDeviceId || null, normalizedExpireAt, isDemotedValue, isBannedValue]
+      `INSERT INTO gpt_accounts (email, token, refresh_token, user_count, chatgpt_account_id, oai_device_id, expire_at, is_demoted, is_banned, space_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))`,
+      [normalizedEmail, token, refreshToken || null, finalUserCount, normalizedChatgptAccountId, normalizedOaiDeviceId || null, normalizedExpireAt, isDemotedValue, isBannedValue, spaceTypeValue]
     )
 
 		    // 获取新创建账号的ID
@@ -429,6 +455,7 @@ router.post('/', async (req, res) => {
 		      SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
 		             COALESCE(is_demoted, 0) AS is_demoted,
 		             COALESCE(is_banned, 0) AS is_banned,
+		             COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
 		             created_at, updated_at
 		      FROM gpt_accounts
 		      WHERE id = last_insert_rowid()
@@ -447,8 +474,9 @@ router.post('/', async (req, res) => {
 		      isOpen: Boolean(row[9]),
 		      isDemoted: Boolean(row[10]),
 		      isBanned: Boolean(row[11]),
-		      createdAt: row[12],
-		      updatedAt: row[13]
+          spaceType: row[12] || SPACE_TYPE_CHILD,
+		      createdAt: row[13],
+		      updatedAt: row[14]
 		    }
 
     // 生成随机兑换码的辅助函数
@@ -467,7 +495,14 @@ router.post('/', async (req, res) => {
 
     // 自动生成兑换码并绑定到该账号。
     // 策略：人数已满(>=5)时不生成兑换码，与现有“满员不可继续上车/不可继续发码”的逻辑保持一致。
-    const codesToGenerate = calcRedeemableSlots(finalUserCount, SPACE_MEMBER_LIMIT)
+    const shouldGenerateCodes = shouldAutoGenerateCodes(spaceTypeValue)
+    if (!shouldGenerateCodes) {
+      console.info('[GptAccounts] skip auto redemption codes for mother space', {
+        email: normalizedEmail,
+        spaceType: spaceTypeValue
+      })
+    }
+    const codesToGenerate = shouldGenerateCodes ? calcRedeemableSlots(finalUserCount, SPACE_MEMBER_LIMIT) : 0
 
     const generatedCodes = []
     for (let i = 0; i < codesToGenerate; i++) {
@@ -499,18 +534,24 @@ router.post('/', async (req, res) => {
     saveDatabase()
 
     // 获取生成的兑换码信息
-    const codesResult = db.exec(`
-      SELECT code FROM redemption_codes
-      WHERE account_email = ?
-      ORDER BY created_at DESC
-    `, [normalizedEmail])
+    const codesResult = db.exec(
+      `
+        SELECT code FROM redemption_codes
+        WHERE account_email = ?
+        ORDER BY created_at DESC
+      `,
+      [normalizedEmail]
+    )
 
     const codes = codesResult[0]?.values.map(row => row[0]) || []
+    const autoGenerateMessage = shouldGenerateCodes
+      ? `账号创建成功，已自动生成${generatedCodes.length}个兑换码`
+      : '账号创建成功，母号空间已跳过自动生成兑换码'
 
     res.status(201).json({
       account,
       generatedCodes: codes,
-      message: `账号创建成功，已自动生成${generatedCodes.length}个兑换码`
+      message: autoGenerateMessage
     })
   } catch (error) {
     console.error('Create GPT account error:', error)
@@ -528,6 +569,13 @@ router.put('/:id', async (req, res) => {
     const normalizedOaiDeviceId = String(oaiDeviceId ?? '').trim()
     const hasExpireAt = Object.prototype.hasOwnProperty.call(body, 'expireAt')
     const normalizedExpireAt = hasExpireAt ? normalizeExpireAt(expireAt) : null
+
+    const hasSpaceType = Object.prototype.hasOwnProperty.call(body, 'spaceType') || Object.prototype.hasOwnProperty.call(body, 'space_type')
+    const spaceTypeInput = Object.prototype.hasOwnProperty.call(body, 'spaceType') ? body.spaceType : body.space_type
+    const normalizedSpaceType = hasSpaceType ? normalizeSpaceTypeInput(spaceTypeInput, null) : null
+    if (hasSpaceType && !normalizedSpaceType) {
+      return res.status(400).json({ error: 'Invalid spaceType' })
+    }
 
     const hasIsDemoted = Object.prototype.hasOwnProperty.call(body, 'isDemoted') || Object.prototype.hasOwnProperty.call(body, 'is_demoted')
     const isDemotedInput = Object.prototype.hasOwnProperty.call(body, 'isDemoted') ? body.isDemoted : body.is_demoted
@@ -583,6 +631,7 @@ router.put('/:id', async (req, res) => {
            chatgpt_account_id = ?,
            oai_device_id = ?,
            expire_at = CASE WHEN ? = 1 THEN ? ELSE expire_at END,
+           space_type = CASE WHEN ? = 1 THEN ? ELSE space_type END,
            is_demoted = CASE WHEN ? = 1 THEN ? ELSE is_demoted END,
            is_banned = CASE WHEN ? = 1 THEN ? ELSE is_banned END,
            is_open = CASE WHEN ? = 1 THEN 0 ELSE is_open END,
@@ -598,6 +647,8 @@ router.put('/:id', async (req, res) => {
         normalizedOaiDeviceId || null,
         hasExpireAt ? 1 : 0,
         normalizedExpireAt,
+        hasSpaceType ? 1 : 0,
+        normalizedSpaceType || SPACE_TYPE_CHILD,
         shouldUpdateIsDemoted ? 1 : 0,
         isDemotedValue,
         shouldUpdateIsBanned ? 1 : 0,
@@ -621,6 +672,7 @@ router.put('/:id', async (req, res) => {
 		      SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
 		             COALESCE(is_demoted, 0) AS is_demoted,
 		             COALESCE(is_banned, 0) AS is_banned,
+		             COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
 		             created_at, updated_at
 		      FROM gpt_accounts
 		      WHERE id = ?
@@ -639,8 +691,9 @@ router.put('/:id', async (req, res) => {
 		      isOpen: Boolean(row[9]),
 		      isDemoted: Boolean(row[10]),
 		      isBanned: Boolean(row[11]),
-		      createdAt: row[12],
-		      updatedAt: row[13]
+          spaceType: row[12] || SPACE_TYPE_CHILD,
+		      createdAt: row[13],
+		      updatedAt: row[14]
 		    }
 
     res.json(account)
@@ -681,6 +734,7 @@ router.patch('/:id/open', async (req, res) => {
 		        SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
 		               COALESCE(is_demoted, 0) AS is_demoted,
 		               COALESCE(is_banned, 0) AS is_banned,
+		               COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
 		               created_at, updated_at
 		        FROM gpt_accounts
 		        WHERE id = ?
@@ -701,8 +755,9 @@ router.patch('/:id/open', async (req, res) => {
 		      isOpen: Boolean(row[9]),
 		      isDemoted: Boolean(row[10]),
 		      isBanned: Boolean(row[11]),
-		      createdAt: row[12],
-		      updatedAt: row[13]
+          spaceType: row[12] || SPACE_TYPE_CHILD,
+		      createdAt: row[13],
+		      updatedAt: row[14]
 		    }
 
     res.json(account)
@@ -745,6 +800,7 @@ router.patch('/:id/ban', async (req, res) => {
                COALESCE(is_demoted, 0) AS is_demoted,
                COALESCE(is_banned, 0) AS is_banned,
                COALESCE(sort_order, id) AS sort_order,
+               COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
                COALESCE(space_status_code, 'normal') AS space_status_code,
                space_status_reason,
                created_at, updated_at
@@ -768,11 +824,12 @@ router.patch('/:id/ban', async (req, res) => {
       isDemoted: Boolean(row[10]),
       isBanned: Boolean(row[11]),
       sortOrder: Number(row[12] || 0),
-      spaceStatusCode: row[13] || 'normal',
-      spaceStatusReason: row[14] || '',
-      createdAt: row[15],
-      updatedAt: row[16],
-      spaceStatus: resolveSpaceStatus({ isBanned: Boolean(row[11]), token: row[2], spaceStatusCode: row[13], spaceStatusReason: row[14] })
+      spaceType: row[13] || SPACE_TYPE_CHILD,
+      spaceStatusCode: row[14] || 'normal',
+      spaceStatusReason: row[15] || '',
+      createdAt: row[16],
+      updatedAt: row[17],
+      spaceStatus: resolveSpaceStatus({ isBanned: Boolean(row[11]), token: row[2], spaceStatusCode: row[14], spaceStatusReason: row[15] })
     }
 
     res.json(account)
@@ -1010,7 +1067,12 @@ router.post('/:id/refresh-token', async (req, res) => {
     const db = await getDatabase()
 
 	    const result = db.exec(
-	      'SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open, COALESCE(is_demoted, 0) AS is_demoted, COALESCE(is_banned, 0) AS is_banned, created_at, updated_at FROM gpt_accounts WHERE id = ?',
+	      `SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
+	              COALESCE(is_demoted, 0) AS is_demoted,
+	              COALESCE(is_banned, 0) AS is_banned,
+	              COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
+	              created_at, updated_at
+	       FROM gpt_accounts WHERE id = ?`,
 	      [req.params.id]
 	    )
 
@@ -1058,7 +1120,12 @@ router.post('/:id/refresh-token', async (req, res) => {
     saveDatabase()
 
 	    const updatedResult = db.exec(
-	      'SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open, COALESCE(is_demoted, 0) AS is_demoted, COALESCE(is_banned, 0) AS is_banned, created_at, updated_at FROM gpt_accounts WHERE id = ?',
+	      `SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
+	              COALESCE(is_demoted, 0) AS is_demoted,
+	              COALESCE(is_banned, 0) AS is_banned,
+	              COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
+	              created_at, updated_at
+	       FROM gpt_accounts WHERE id = ?`,
 	      [req.params.id]
 	    )
     const updatedRow = updatedResult[0].values[0]
@@ -1075,8 +1142,9 @@ router.post('/:id/refresh-token', async (req, res) => {
 	      isOpen: Boolean(updatedRow[9]),
 	      isDemoted: Boolean(updatedRow[10]),
 	      isBanned: Boolean(updatedRow[11]),
-	      createdAt: updatedRow[12],
-	      updatedAt: updatedRow[13]
+	      spaceType: updatedRow[12] || SPACE_TYPE_CHILD,
+	      createdAt: updatedRow[13],
+	      updatedAt: updatedRow[14]
 	    }
 
     res.json({
