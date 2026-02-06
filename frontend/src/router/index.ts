@@ -209,18 +209,29 @@ const router = createRouter({
         {
           path: 'product-management',
           name: 'product-management',
+          redirect: { name: 'product-management-list' },
+          meta: { requiredMenuKey: 'product_management', featureKey: 'payment' },
+        },
+        {
+          path: 'product-management/list',
+          name: 'product-management-list',
           component: ProductManagementView,
-          meta: { requiredMenuKeys: ['product_management', 'purchase_orders'], featureKey: 'payment' },
+          meta: { requiredMenuKey: 'product_management', featureKey: 'payment' },
+        },
+        {
+          path: 'order-management/product-management',
+          name: 'product-management-legacy-order-management',
+          redirect: { name: 'product-management-list' },
         },
         {
           path: 'products',
           name: 'product-management-legacy-products',
-          redirect: { name: 'product-management' },
+          redirect: { name: 'product-management-list' },
         },
         {
           path: 'product',
           name: 'product-management-legacy-product',
-          redirect: { name: 'product-management' },
+          redirect: { name: 'product-management-list' },
         },
         {
           path: 'credit-orders',

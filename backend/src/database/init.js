@@ -285,6 +285,8 @@ const ensureRbacTables = (database) => {
       { key: 'user_info', label: '用户信息', path: '/admin/user-info', sortOrder: 2 },
       { key: 'accounts', label: '账号管理', path: '/admin/accounts', sortOrder: 3 },
       { key: 'redemption_codes', label: '兑换码管理', path: '/admin/redemption-codes', sortOrder: 4 },
+      { key: 'product_management', label: '商品管理', path: '/admin/product-management', sortOrder: 5 },
+      { key: 'product_management_list', label: '商品列表', path: '/admin/product-management/list', parentKey: 'product_management', sortOrder: 1 },
       { key: 'order_management', label: '订单管理', path: '', sortOrder: 6 },
       { key: 'purchase_orders', label: '支付订单', path: '/admin/purchase-orders', parentKey: 'order_management', sortOrder: 1 },
       { key: 'xhs_orders', label: '小红书订单', path: '/admin/xhs-orders', parentKey: 'order_management', sortOrder: 2 },
@@ -312,6 +314,44 @@ const ensureRbacTables = (database) => {
       if (menuInfo?.id) {
         menuInfosByKey.set(item.key, menuInfo)
       }
+    }
+
+    // 兼容历史结构：商品管理曾挂在订单管理下，统一迁移为一级菜单
+    try {
+      const productMenuIdResult = database.exec('SELECT id FROM menus WHERE menu_key = ? LIMIT 1', ['product_management'])
+      const productMenuId = Number(productMenuIdResult?.[0]?.values?.[0]?.[0] ?? 0)
+      if (Number.isFinite(productMenuId) && productMenuId > 0) {
+        const orderMenuIdResult = database.exec('SELECT id FROM menus WHERE menu_key = ? LIMIT 1', ['order_management'])
+        const orderMenuId = Number(orderMenuIdResult?.[0]?.values?.[0]?.[0] ?? 0)
+        const updateResult = database.exec('SELECT parent_id, path, label, sort_order FROM menus WHERE id = ? LIMIT 1', [productMenuId])
+        const row = updateResult?.[0]?.values?.[0] || []
+        const currentParentId = row[0] == null ? null : Number(row[0])
+        const currentPath = String(row[1] || '')
+        const currentLabel = String(row[2] || '')
+        const currentSortOrder = Number(row[3] || 0)
+        const shouldMoveToTopLevel = Number.isFinite(orderMenuId) && orderMenuId > 0 && currentParentId === orderMenuId
+        const shouldFixPath = currentPath !== '/admin/product-management'
+        const shouldFixLabel = currentLabel !== '商品管理'
+        const shouldFixSort = currentSortOrder !== 5
+
+        if (shouldMoveToTopLevel || shouldFixPath || shouldFixLabel || shouldFixSort) {
+          database.run(
+            `
+              UPDATE menus
+              SET parent_id = NULL,
+                  path = ?,
+                  label = ?,
+                  sort_order = ?,
+                  updated_at = DATETIME('now', 'localtime')
+              WHERE id = ?
+            `,
+            ['/admin/product-management', '商品管理', 5, productMenuId]
+          )
+          changed = true
+        }
+      }
+    } catch (error) {
+      console.warn('[RBAC] 迁移商品管理菜单结构失败:', error?.message || error)
     }
 
     const resolveMenuIdByKey = (menuKey) => {

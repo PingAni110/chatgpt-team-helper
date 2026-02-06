@@ -83,6 +83,45 @@
             今日库存不足，请稍后再试。
           </p>
 
+          <div class="rounded-2xl bg-white/45 dark:bg-black/20 border border-black/5 dark:border-white/10 p-4 sm:p-5 space-y-3">
+            <h4 class="text-[13px] font-semibold text-[#86868b] uppercase tracking-wider">兑换码进入空间</h4>
+            <p class="text-[12px] text-[#86868b]">库存不足时也可使用兑换码直接进入对应空间。</p>
+
+            <div class="space-y-2">
+              <input
+                :value="redeemCode"
+                type="text"
+                inputmode="text"
+                maxlength="14"
+                placeholder="请输入兑换码（XXXX-XXXX-XXXX）"
+                class="w-full rounded-xl border border-gray-200/80 bg-white/80 px-3 py-2 text-sm outline-none focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20"
+                :disabled="redeemLoading"
+                @input="handleRedeemCodeInput"
+              />
+              <input
+                v-model.trim="redeemEmail"
+                type="email"
+                placeholder="请输入接收邀请的邮箱"
+                class="w-full rounded-xl border border-gray-200/80 bg-white/80 px-3 py-2 text-sm outline-none focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20"
+                :disabled="redeemLoading"
+              />
+            </div>
+
+            <AppleButton
+              type="button"
+              variant="primary"
+              size="lg"
+              class="w-full h-[42px]"
+              :loading="redeemLoading"
+              :disabled="redeemLoading"
+              @click="submitRedeemCode"
+            >
+              {{ redeemLoading ? '兑换中...' : '兑换并进入空间' }}
+            </AppleButton>
+
+            <p v-if="redeemErrorMessage" class="text-[12px] text-[#FF3B30]">{{ redeemErrorMessage }}</p>
+          </div>
+
           <div class="pt-6 border-t border-gray-200/60 dark:border-white/10">
             <h4 class="text-[13px] font-semibold text-[#86868b] uppercase tracking-wider mb-4">购买须知</h4>
             <ul class="space-y-3 text-[14px] text-[#1d1d1f]/70 dark:text-white/70">
@@ -115,7 +154,7 @@ import RedeemShell from '@/components/RedeemShell.vue'
 import AppleCard from '@/components/ui/apple/Card.vue'
 import AppleButton from '@/components/ui/apple/Button.vue'
 import PurchaseCheckoutDrawer from '@/components/purchase/PurchaseCheckoutDrawer.vue'
-import { purchaseService, type PurchaseMeta, type PurchasePlan, type PurchaseOrderType } from '@/services/api'
+import { authService, purchaseService, redemptionCodeService, type PurchaseMeta, type PurchasePlan, type PurchaseOrderType } from '@/services/api'
 import { ArrowLeft } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -125,6 +164,25 @@ const meta = ref<PurchaseMeta | null>(null)
 const errorMessage = ref('')
 const loading = ref(false)
 const isCheckoutOpen = ref(false)
+const redeemCode = ref('')
+const redeemEmail = ref(String(authService.getCurrentUser()?.email || '').trim())
+const redeemLoading = ref(false)
+const redeemErrorMessage = ref('')
+
+const formatRedeemCode = (value: string) => {
+  let formatted = String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+  if (formatted.length > 4 && formatted.length <= 8) {
+    formatted = `${formatted.slice(0, 4)}-${formatted.slice(4)}`
+  } else if (formatted.length > 8) {
+    formatted = `${formatted.slice(0, 4)}-${formatted.slice(4, 8)}-${formatted.slice(8, 12)}`
+  }
+  return formatted.slice(0, 14)
+}
+
+const handleRedeemCodeInput = (event: Event) => {
+  const next = (event.target as HTMLInputElement)?.value || ''
+  redeemCode.value = formatRedeemCode(next)
+}
 
 const normalizeOrderType = (value: unknown): PurchaseOrderType | null => {
   const raw = Array.isArray(value) ? value[0] : value
@@ -203,6 +261,66 @@ const openCheckout = () => {
   if (!planKey.value) return
   if (isSoldOut.value) return
   isCheckoutOpen.value = true
+}
+
+const submitRedeemCode = async () => {
+  if (redeemLoading.value) return
+  redeemErrorMessage.value = ''
+
+  const code = formatRedeemCode(redeemCode.value)
+  const email = String(redeemEmail.value || '').trim()
+
+  if (!code) {
+    redeemErrorMessage.value = '请输入兑换码'
+    return
+  }
+  if (!/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code)) {
+    redeemErrorMessage.value = '兑换码格式不正确，应为 XXXX-XXXX-XXXX'
+    return
+  }
+  if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+    redeemErrorMessage.value = '请输入有效邮箱'
+    return
+  }
+
+  redeemLoading.value = true
+  try {
+    // 本地联调 mock：便于前端验证成功/失败路径
+    if (import.meta.env.DEV && code === 'MOCK-SUCC-0001') {
+      await router.push({
+        name: 'linux-do-open-accounts',
+        query: {
+          from: 'purchase-redeem-mock',
+          accountEmail: 'mock-space@example.com',
+          spaceId: 'mock-space-001'
+        }
+      })
+      return
+    }
+    if (import.meta.env.DEV && code === 'MOCK-FAIL-0001') {
+      redeemErrorMessage.value = '模拟失败：兑换码已过期或已使用'
+      return
+    }
+
+    const response = await redemptionCodeService.redeem({
+      email,
+      code,
+      orderType: planKey.value || undefined
+    })
+    const accountEmail = String(response?.data?.data?.accountEmail || '').trim()
+    redeemCode.value = ''
+    await router.push({
+      name: 'linux-do-open-accounts',
+      query: {
+        from: 'purchase-redeem',
+        ...(accountEmail ? { accountEmail } : {})
+      }
+    })
+  } catch (error: any) {
+    redeemErrorMessage.value = error?.response?.data?.message || error?.response?.data?.error || '兑换失败，请稍后重试'
+  } finally {
+    redeemLoading.value = false
+  }
 }
 
 onMounted(() => {

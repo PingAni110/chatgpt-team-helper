@@ -52,6 +52,7 @@ const ICONS_BY_MENU_KEY: Record<string, any> = {
   xianyu_orders: Package,
   purchase_orders: CreditCard,
   product_management: CreditCard,
+  product_management_list: CreditCard,
   credit_orders: Coins,
   order_management: ShoppingCart,
   waiting_room: Train,
@@ -66,6 +67,14 @@ const FALLBACK_ADMIN_MENU_TREE: AdminMenuDraftNode[] = [
   { key: 'user_info', path: '/admin/user-info', label: '用户信息' },
   { key: 'accounts', path: '/admin/accounts', label: '账号管理' },
   { key: 'redemption_codes', path: '/admin/redemption-codes', label: '兑换码管理' },
+  {
+    key: 'product_management',
+    path: '/admin/product-management',
+    label: '商品管理',
+    children: [
+      { key: 'product_management_list', path: '/admin/product-management/list', label: '商品列表' },
+    ],
+  },
   {
     key: 'order_management',
     path: '',
@@ -156,6 +165,7 @@ export const filterAdminMenuTreeByFeatureFlags = (tree: AdminMenuNode[], feature
     xianyu_orders: 'xianyu',
     purchase_orders: 'payment',
     product_management: 'payment',
+    product_management_list: 'payment',
     credit_orders: 'openAccounts'
   }
 
