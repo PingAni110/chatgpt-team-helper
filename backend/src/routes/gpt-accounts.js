@@ -247,40 +247,69 @@ router.get('/', async (req, res) => {
 
 	    // 查询分页数据
 	    const offset = (page - 1) * pageSize
-	    const dataResult = db.exec(`
-	      SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
-	             COALESCE(is_demoted, 0) AS is_demoted,
-	             COALESCE(is_banned, 0) AS is_banned,
-	             COALESCE(sort_order, id) AS sort_order,
-	             COALESCE(space_status_code, 'normal') AS space_status_code,
-	             space_status_reason,
-	             created_at, updated_at
-	      FROM gpt_accounts
-	      ${whereClause}
-	      ORDER BY COALESCE(sort_order, id) ASC, created_at DESC
-	      LIMIT ? OFFSET ?
-	    `, [...params, pageSize, offset])
+    let dataResult
+    try {
+      dataResult = db.exec(`
+        SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
+               COALESCE(is_demoted, 0) AS is_demoted,
+               COALESCE(is_banned, 0) AS is_banned,
+               COALESCE(sort_order, id) AS sort_order,
+               COALESCE(space_status_code, 'normal') AS space_status_code,
+               space_status_reason,
+               created_at, updated_at
+        FROM gpt_accounts
+        ${whereClause}
+        ORDER BY COALESCE(sort_order, id) ASC, created_at DESC
+        LIMIT ? OFFSET ?
+      `, [...params, pageSize, offset])
+    } catch (error) {
+      console.warn('[GptAccounts] fallback list query (legacy schema):', error?.message || error)
+      dataResult = db.exec(`
+        SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
+               COALESCE(is_demoted, 0) AS is_demoted,
+               COALESCE(is_banned, 0) AS is_banned,
+               COALESCE(sort_order, id) AS sort_order,
+               created_at, updated_at
+        FROM gpt_accounts
+        ${whereClause}
+        ORDER BY COALESCE(sort_order, id) ASC, created_at DESC
+        LIMIT ? OFFSET ?
+      `, [...params, pageSize, offset])
+    }
 
-	    const accounts = (dataResult[0]?.values || []).map(row => ({
-	      id: row[0],
-	      email: row[1],
-	      token: row[2],
-	      refreshToken: row[3],
-	      userCount: row[4],
-	      inviteCount: row[5],
-	      chatgptAccountId: row[6],
-	      oaiDeviceId: row[7],
-	      expireAt: row[8] || null,
-	      isOpen: Boolean(row[9]),
-	      isDemoted: Boolean(row[10]),
-	      isBanned: Boolean(row[11]),
-	      sortOrder: Number(row[12] || 0),
-	      spaceStatusCode: row[13] || 'normal',
-	      spaceStatusReason: row[14] || '',
-	      createdAt: row[15],
-	      updatedAt: row[16],
-	      spaceStatus: resolveSpaceStatus({ isBanned: Boolean(row[11]), token: row[2], spaceStatusCode: row[13], spaceStatusReason: row[14] })
-	    }))
+    const accounts = (dataResult[0]?.values || []).map(row => {
+      const hasStatusColumns = row.length >= 17
+      const spaceStatusCode = hasStatusColumns ? (row[13] || 'normal') : 'normal'
+      const spaceStatusReason = hasStatusColumns ? (row[14] || '') : ''
+      const createdAt = hasStatusColumns ? row[15] : row[13]
+      const updatedAt = hasStatusColumns ? row[16] : row[14]
+
+      return {
+        id: row[0],
+        email: row[1],
+        token: row[2],
+        refreshToken: row[3],
+        userCount: row[4],
+        inviteCount: row[5],
+        chatgptAccountId: row[6],
+        oaiDeviceId: row[7],
+        expireAt: row[8] || null,
+        isOpen: Boolean(row[9]),
+        isDemoted: Boolean(row[10]),
+        isBanned: Boolean(row[11]),
+        sortOrder: Number(row[12] || 0),
+        spaceStatusCode,
+        spaceStatusReason,
+        createdAt,
+        updatedAt,
+        spaceStatus: resolveSpaceStatus({
+          isBanned: Boolean(row[11]),
+          token: row[2],
+          spaceStatusCode,
+          spaceStatusReason
+        })
+      }
+    })
 
     res.json({
       accounts,
