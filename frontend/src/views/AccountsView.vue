@@ -4,7 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { authService, gptAccountService, openaiOAuthService, userService, type GptAccount, type CreateGptAccountDto, type SyncUserCountResponse, type GptAccountsListParams, type ChatgptAccountInviteItem, type ChatgptAccountCheckInfo, type OpenAIOAuthSession, type OpenAIOAuthExchangeResult } from '@/services/api'
 import { formatShanghaiDate } from '@/lib/datetime'
 import { useAppConfigStore } from '@/stores/appConfig'
-import { buildSpaceTabQuery, buildSpaceTypeQuery, createRequestGuard, readSpaceTabStorage, readSpaceTypeStorage, resolveInitialSpaceTab, resolveInitialSpaceType, resolveSpaceTab, resolveSpaceType, writeSpaceTabStorage, writeSpaceTypeStorage } from '@/lib/accounts-view-state'
+import { buildSpaceTabQuery, createRequestGuard, readSpaceTabStorage, resolveInitialSpaceTab, resolveSpaceTab, writeSpaceTabStorage } from '@/lib/accounts-view-state'
 import {
   Card,
   CardContent,
@@ -88,17 +88,10 @@ onMounted(async () => {
     queryValue: route.query.spaceStatus,
     storedValue: readSpaceTabStorage()
   })
-  const initialSpaceType = resolveInitialSpaceType({
-    queryValue: route.query.spaceType,
-    storedValue: readSpaceTypeStorage()
-  })
   activeSpaceTab.value = initialTab
-  spaceTypeFilter.value = initialSpaceType
   writeSpaceTabStorage(initialTab)
-  writeSpaceTypeStorage(initialSpaceType)
-  const mergedQuery = buildSpaceTabQuery(buildSpaceTypeQuery(route.query, initialSpaceType), initialTab)
-  if (route.query.spaceStatus !== initialTab || route.query.spaceType !== initialSpaceType) {
-    router.replace({ query: mergedQuery })
+  if (route.query.spaceStatus !== initialTab) {
+    router.replace({ query: buildSpaceTabQuery(route.query, initialTab) })
   }
 
   await loadAccounts()
@@ -655,17 +648,6 @@ watch(
 )
 
 watch(
-  () => route.query.spaceType,
-  (value) => {
-    const nextType = resolveSpaceType(value)
-    if (spaceTypeFilter.value !== nextType) {
-      spaceTypeFilter.value = nextType
-      writeSpaceTypeStorage(nextType)
-    }
-  }
-)
-
-watch(
   () => formData.value.chatgptAccountId,
   (nextValue) => {
     applyCheckedAccountSelection(String(nextValue || ''))
@@ -1159,15 +1141,6 @@ const handleInviteSubmit = async () => {
           </SelectContent>
         </Select>
 
-        <Select v-model="spaceTypeFilter">
-          <SelectTrigger class="h-11 w-[140px] bg-white border-transparent shadow-[0_2px_10px_rgba(0,0,0,0.03)] rounded-xl">
-            <SelectValue placeholder="空间类型" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="child">子号</SelectItem>
-            <SelectItem value="mother">母号</SelectItem>
-          </SelectContent>
-        </Select>
       </div>
     </div>
 
