@@ -1197,6 +1197,7 @@ const handleInviteSubmit = async () => {
                 <th class="px-6 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">ID</th>
                 <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">排序</th>
                 <th class="px-6 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">邮箱</th>
+                <th class="px-6 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">空间归属</th>
                 <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">已加入</th>
                 <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">待加入</th>
                 <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">降级</th>
@@ -1232,6 +1233,14 @@ const handleInviteSubmit = async () => {
 	                    </span>
 	                  </div>
 	                </td>
+                <td class="px-6 py-5">
+                  <span
+                    class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border"
+                    :class="account.spaceType === 'mother' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' : 'bg-slate-50 text-slate-700 border-slate-100'"
+                  >
+                    {{ account.spaceType === 'mother' ? '母号空间' : '子号空间' }}
+                  </span>
+                </td>
                 <td class="px-6 py-5 text-center">
                   <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-100">
                     {{ account.userCount }} 人
@@ -1359,6 +1368,12 @@ const handleInviteSubmit = async () => {
               <div class="flex flex-wrap justify-end gap-2">
                  <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-100">
                     {{ account.userCount }} 人
+                 </span>
+                 <span
+                   class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border"
+                   :class="account.spaceType === 'mother' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' : 'bg-slate-50 text-slate-700 border-slate-100'"
+                 >
+                   {{ account.spaceType === 'mother' ? '母号' : '子号' }}
                  </span>
                  <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-purple-50 text-purple-600 border border-purple-100">
                     {{ account.inviteCount ?? 0 }} 待
@@ -1678,6 +1693,27 @@ const handleInviteSubmit = async () => {
 		              </div>
 
                   <div class="grid grid-cols-2 gap-4">
+                    <div class="space-y-2">
+                      <Label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">空间归属</Label>
+                      <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-xl">
+                        <button
+                          type="button"
+                          class="flex-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
+                          :class="formData.spaceType !== 'mother' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
+                          @click="formData.spaceType = 'child'"
+                        >
+                          子号空间
+                        </button>
+                        <button
+                          type="button"
+                          class="flex-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
+                          :class="formData.spaceType === 'mother' ? 'bg-indigo-50 text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
+                          @click="formData.spaceType = 'mother'"
+                        >
+                          母号空间
+                        </button>
+                      </div>
+                    </div>
                     <div class="space-y-2">
                       <Label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">降级状态</Label>
                       <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-xl">
