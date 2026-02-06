@@ -2,6 +2,7 @@ import express from 'express'
 import { getDatabase } from '../database/init.js'
 import { authenticateToken } from '../middleware/auth.js'
 import { requireSuperAdmin } from '../middleware/rbac.js'
+import { SPACE_MEMBER_LIMIT } from '../utils/space-capacity.js'
 
 const router = express.Router()
 
@@ -47,7 +48,7 @@ const resolveDateRange = (query) => {
   return { ok: true, from, to }
 }
 
-const ACCOUNT_CAPACITY = 6
+const ACCOUNT_CAPACITY = SPACE_MEMBER_LIMIT
 
 router.get('/overview', async (req, res) => {
   const range = resolveDateRange(req.query)
