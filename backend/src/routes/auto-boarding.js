@@ -2,6 +2,8 @@ import express from 'express'
 import { getDatabase, saveDatabase } from '../database/init.js'
 import { apiKeyAuth } from '../middleware/api-key-auth.js'
 import { syncAccountUserCount } from '../services/account-sync.js'
+import { SPACE_MEMBER_LIMIT } from '../utils/space-capacity.js'
+import { SPACE_TYPE_CHILD, shouldAutoGenerateCodes } from '../utils/space-type.js'
 
 const router = express.Router()
 
@@ -268,15 +270,26 @@ router.post('/', apiKeyAuth, async (req, res) => {
       // 创建新账号，默认人数设置为1而不是0
       db.run(
         `INSERT INTO gpt_accounts
-         (email, token, refresh_token, user_count, chatgpt_account_id, oai_device_id, expire_at, is_open, is_demoted, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))`,
-        [normalizedEmail, token, refreshToken || null, 1, chatgptAccountId || null, oaiDeviceId || null, expireAt, shouldUpdateIsDemoted ? isDemotedValue : 0]
+         (email, token, refresh_token, user_count, chatgpt_account_id, oai_device_id, expire_at, is_open, is_demoted, space_type, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))`,
+        [
+          normalizedEmail,
+          token,
+          refreshToken || null,
+          1,
+          chatgptAccountId || null,
+          oaiDeviceId || null,
+          expireAt,
+          shouldUpdateIsDemoted ? isDemotedValue : 0,
+          SPACE_TYPE_CHILD
+        ]
       )
 
       // 获取新创建的账号
       const result = db.exec(`
         SELECT id, email, token, refresh_token, user_count, chatgpt_account_id, oai_device_id, expire_at,
                COALESCE(is_demoted, 0) AS is_demoted,
+               COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
                created_at, updated_at
         FROM gpt_accounts
         WHERE id = last_insert_rowid()
@@ -293,17 +306,26 @@ router.post('/', apiKeyAuth, async (req, res) => {
         oaiDeviceId: row[6],
         expireAt: row[7] || null,
         isDemoted: Boolean(row[8]),
-        createdAt: row[9],
-        updatedAt: row[10]
+        spaceType: row[9] || SPACE_TYPE_CHILD,
+        createdAt: row[10],
+        updatedAt: row[11]
       }
 
       // 自动生成兑换码，数量为可用名额
-      // 可用名额 = 总容量(5) - 当前人数(1) - 所有兑换码数(0) = 4
-      const totalCapacity = 5
-      const currentUserCount = 1  // 刚创建的账号默认人数为1
+      // 可用名额 = 总容量(5) - 当前人数 - 所有兑换码数(0)
+      const totalCapacity = SPACE_MEMBER_LIMIT
+      const userSync = await syncAccountUserCount(account.id, { accountRecord: account, userListParams: { offset: 0, limit: 1, query: '' } })
+      const currentUserCount = Number(userSync?.syncedUserCount ?? account.userCount ?? 1)
       const allCodesCount = 0  // 新账号还没有任何兑换码
       const availableSlots = totalCapacity - currentUserCount - allCodesCount
-      const codesToGenerate = Math.min(4, availableSlots)  // 生成4个兑换码（正好填满可用名额）
+      const shouldGenerateCodes = shouldAutoGenerateCodes(account.spaceType)
+      if (!shouldGenerateCodes) {
+        console.info('[AutoBoarding] skip auto redemption codes for mother space', {
+          email: account.email,
+          spaceType: account.spaceType
+        })
+      }
+      const codesToGenerate = shouldGenerateCodes ? Math.min(4, availableSlots) : 0  // 生成4个兑换码（正好填满可用名额）
 
       const generatedCodes = []
       for (let i = 0; i < codesToGenerate; i++) {
@@ -342,7 +364,7 @@ router.post('/', apiKeyAuth, async (req, res) => {
         action: 'created',
         account: responseAccount,
         generatedCodes,
-        codesMessage: `已自动生成${generatedCodes.length}个兑换码`,
+        codesMessage: shouldGenerateCodes ? `已自动生成${generatedCodes.length}个兑换码` : '母号空间已跳过自动生成兑换码',
         syncResult,
         removedUsers
       })

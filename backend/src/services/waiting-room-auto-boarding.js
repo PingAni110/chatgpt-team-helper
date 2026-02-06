@@ -1,6 +1,7 @@
 import { getDatabase, saveDatabase } from '../database/init.js'
 import { syncAccountInviteCount, syncAccountUserCount } from './account-sync.js'
 import { inviteUserToChatGPTTeam } from './chatgpt-invite.js'
+import { SPACE_MEMBER_LIMIT } from '../utils/space-capacity.js'
 
 const LABEL = '[WaitingRoomAutoBoarding]'
 const DEFAULT_ACTIVE_HOURS = [8, 9, 10, 11, 12, 13, 14]
@@ -248,10 +249,10 @@ function selectAccountForCode(db, accountEmail) {
       SELECT id, email, token, user_count, chatgpt_account_id, oai_device_id
       FROM gpt_accounts
       WHERE email = ?
-        AND COALESCE(user_count, 0) + COALESCE(invite_count, 0) < 6
+        AND COALESCE(user_count, 0) + COALESCE(invite_count, 0) < ?
       LIMIT 1
       `,
-      [accountEmail]
+      [accountEmail, SPACE_MEMBER_LIMIT]
     )
     if (result.length && result[0].values.length) {
       const [id, email, token, userCount, chatgptAccountId, oaiDeviceId] = result[0].values[0]
@@ -263,10 +264,11 @@ function selectAccountForCode(db, accountEmail) {
     `
       SELECT id, email, token, user_count, chatgpt_account_id, oai_device_id
       FROM gpt_accounts
-      WHERE COALESCE(user_count, 0) + COALESCE(invite_count, 0) < 6
+      WHERE COALESCE(user_count, 0) + COALESCE(invite_count, 0) < ?
       ORDER BY COALESCE(user_count, 0) + COALESCE(invite_count, 0) ASC, RANDOM()
       LIMIT 1
-    `
+    `,
+    [SPACE_MEMBER_LIMIT]
   )
 
   if (!fallback.length || !fallback[0].values.length) {
