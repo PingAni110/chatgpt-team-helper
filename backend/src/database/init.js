@@ -1750,6 +1750,8 @@ export async function initDatabase() {
 	      is_banned INTEGER DEFAULT 0,
 	      ban_processed INTEGER DEFAULT 0,
 	      sort_order INTEGER DEFAULT 0,
+	      space_status_code TEXT DEFAULT 'normal',
+	      space_status_reason TEXT,
 	      created_at DATETIME DEFAULT (DATETIME('now', 'localtime')),
 	      updated_at DATETIME DEFAULT (DATETIME('now', 'localtime'))
 	    )
@@ -1845,6 +1847,16 @@ export async function initDatabase() {
 	      if (!columns.includes('sort_order')) {
 	        database.run('ALTER TABLE gpt_accounts ADD COLUMN sort_order INTEGER DEFAULT 0')
 	        console.log('已添加 sort_order 列到 gpt_accounts 表')
+	      }
+
+	      if (!columns.includes('space_status_code')) {
+	        database.run("ALTER TABLE gpt_accounts ADD COLUMN space_status_code TEXT DEFAULT 'normal'")
+	        console.log('已添加 space_status_code 列到 gpt_accounts 表')
+	      }
+
+	      if (!columns.includes('space_status_reason')) {
+	        database.run('ALTER TABLE gpt_accounts ADD COLUMN space_status_reason TEXT')
+	        console.log('已添加 space_status_reason 列到 gpt_accounts 表')
 	      }
 
 	      database.run(`

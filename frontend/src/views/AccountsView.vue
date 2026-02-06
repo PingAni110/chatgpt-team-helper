@@ -100,6 +100,7 @@ const syncingAccountId = ref<number | null>(null)
 const showSyncResultDialog = ref(false)
 const syncResult = ref<SyncUserCountResponse | null>(null)
 const syncError = ref('')
+const hasShownTokenExpiredHint = ref(false)
 const previousUserCount = ref<number | null>(null)
 const previousInviteCount = ref<number | null>(null)
 const deletingUserId = ref<string | null>(null)
@@ -154,6 +155,26 @@ const resolveRequestError = (err: any, fallback: string) => {
     err?.message ||
     fallback
   )
+}
+
+const isTokenInvalidError = (err: any) => {
+  const status = Number(err?.response?.status ?? err?.status ?? 0)
+  const message = String(err?.response?.data?.error || err?.response?.data?.message || err?.message || '').toLowerCase()
+  if (status === 401 || status === 403) return true
+  return /token.*(过期|无效|invalid|expired)|unauthorized|invalid token/.test(message)
+}
+
+const markAccountStatusAbnormal = (accountId: number, reason: string) => {
+  const idx = accounts.value.findIndex(item => item.id === accountId)
+  if (idx === -1) return
+  const current = accounts.value[idx]
+  if (!current) return
+  accounts.value[idx] = {
+    ...current,
+    spaceStatus: { code: 'abnormal', reason },
+    updatedAt: current.updatedAt
+  }
+  accounts.value = [...accounts.value]
 }
 
 const ensureSystemApiKey = async (): Promise<string | null> => {
@@ -722,6 +743,7 @@ const applySyncResultToState = (result: SyncUserCountResponse) => {
       ...current,
       userCount: result.syncedUserCount,
       inviteCount: typeof nextInviteCount === 'number' ? nextInviteCount : current.inviteCount,
+      spaceStatus: result.account?.spaceStatus || current.spaceStatus,
       updatedAt: result.account.updatedAt
     }
     accounts.value = [...accounts.value]
@@ -834,6 +856,13 @@ const handleShowMembers = async (account: GptAccount) => {
     loadInvites(account.id)
   } catch (err: any) {
     syncError.value = err.response?.data?.error || '获取成员信息失败'
+    if (isTokenInvalidError(err)) {
+      markAccountStatusAbnormal(account.id, 'Token 已过期或无效，请更新账号 token')
+      if (!hasShownTokenExpiredHint.value) {
+        showWarningToast('该空间 token 已失效，请更新 token 后重试同步')
+        hasShownTokenExpiredHint.value = true
+      }
+    }
     showSyncResultDialog.value = true
   } finally {
     syncingAccountId.value = null
@@ -857,7 +886,15 @@ const handleSyncUserCount = async (account: GptAccount) => {
     // 同步后仅更新列表，不弹出成员信息
     showSuccessToast('同步成功')
   } catch (err: any) {
-showErrorToast(err.response?.data?.error || '同步失败，请检查网络连接和账号配置')
+    if (isTokenInvalidError(err)) {
+      markAccountStatusAbnormal(account.id, 'Token 已过期或无效，请更新账号 token')
+      if (!hasShownTokenExpiredHint.value) {
+        showErrorToast('Token 已过期或无效，请更新账号 token 后重试同步')
+        hasShownTokenExpiredHint.value = true
+      }
+    } else {
+      showErrorToast(err.response?.data?.error || '同步失败，请检查网络连接和账号配置')
+    }
   } finally {
     syncingAccountId.value = null
   }

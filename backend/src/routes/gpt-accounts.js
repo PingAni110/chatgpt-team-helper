@@ -79,6 +79,12 @@ const normalizeShanghaiDateTime = (value) => {
 }
 
 const resolveSpaceStatus = (account) => {
+  const statusCode = String(account?.spaceStatusCode || account?.space_status_code || '').trim().toLowerCase()
+  const statusReason = String(account?.spaceStatusReason || account?.space_status_reason || '').trim()
+  if (statusCode === 'abnormal') {
+    return { code: 'abnormal', reason: statusReason || '空间异常' }
+  }
+
   if (Boolean(account?.isBanned)) {
     return { code: 'abnormal', reason: '账号被封' }
   }
@@ -88,7 +94,30 @@ const resolveSpaceStatus = (account) => {
     return { code: 'abnormal', reason: 'Token 失效' }
   }
 
-  return { code: 'normal', reason: '正常' }
+  return { code: 'normal', reason: statusReason || '正常' }
+}
+
+const isTokenInvalidSyncError = (error) => {
+  const status = Number(error?.status ?? error?.statusCode ?? 0)
+  const message = String(error?.message || '').toLowerCase()
+  if (status === 401 || status === 403) return true
+  return /token.*(过期|无效|invalid|expired)|unauthorized|invalid token/.test(message)
+}
+
+const markAccountSpaceStatus = async (db, accountId, { code, reason = '' } = {}) => {
+  const normalizedCode = String(code || '').trim().toLowerCase() === 'abnormal' ? 'abnormal' : 'normal'
+  const normalizedReason = String(reason || '').trim()
+  db.run(
+    `
+      UPDATE gpt_accounts
+      SET space_status_code = ?,
+          space_status_reason = ?,
+          updated_at = DATETIME('now', 'localtime')
+      WHERE id = ?
+    `,
+    [normalizedCode, normalizedReason || null, accountId]
+  )
+  saveDatabase()
 }
 
 const collectEmails = (payload) => {
@@ -223,6 +252,8 @@ router.get('/', async (req, res) => {
 	             COALESCE(is_demoted, 0) AS is_demoted,
 	             COALESCE(is_banned, 0) AS is_banned,
 	             COALESCE(sort_order, id) AS sort_order,
+	             COALESCE(space_status_code, 'normal') AS space_status_code,
+	             space_status_reason,
 	             created_at, updated_at
 	      FROM gpt_accounts
 	      ${whereClause}
@@ -244,9 +275,11 @@ router.get('/', async (req, res) => {
 	      isDemoted: Boolean(row[10]),
 	      isBanned: Boolean(row[11]),
 	      sortOrder: Number(row[12] || 0),
-	      createdAt: row[13],
-	      updatedAt: row[14],
-	      spaceStatus: resolveSpaceStatus({ isBanned: Boolean(row[11]), token: row[2] })
+	      spaceStatusCode: row[13] || 'normal',
+	      spaceStatusReason: row[14] || '',
+	      createdAt: row[15],
+	      updatedAt: row[16],
+	      spaceStatus: resolveSpaceStatus({ isBanned: Boolean(row[11]), token: row[2], spaceStatusCode: row[13], spaceStatusReason: row[14] })
 	    }))
 
     res.json({
@@ -674,6 +707,8 @@ router.patch('/:id/ban', async (req, res) => {
                COALESCE(is_demoted, 0) AS is_demoted,
                COALESCE(is_banned, 0) AS is_banned,
                COALESCE(sort_order, id) AS sort_order,
+               COALESCE(space_status_code, 'normal') AS space_status_code,
+               space_status_reason,
                created_at, updated_at
         FROM gpt_accounts
         WHERE id = ?
@@ -695,9 +730,11 @@ router.patch('/:id/ban', async (req, res) => {
       isDemoted: Boolean(row[10]),
       isBanned: Boolean(row[11]),
       sortOrder: Number(row[12] || 0),
-      createdAt: row[13],
-      updatedAt: row[14],
-      spaceStatus: resolveSpaceStatus({ isBanned: Boolean(row[11]), token: row[2] })
+      spaceStatusCode: row[13] || 'normal',
+      spaceStatusReason: row[14] || '',
+      createdAt: row[15],
+      updatedAt: row[16],
+      spaceStatus: resolveSpaceStatus({ isBanned: Boolean(row[11]), token: row[2], spaceStatusCode: row[13], spaceStatusReason: row[14] })
     }
 
     res.json(account)
@@ -751,8 +788,23 @@ router.post('/sync-all', async (req, res) => {
           accountRecord: userSync.account,
           inviteListParams: { offset: 0, limit: 1, query: '' }
         })
-        results.push({ id: accountId, ok: true, account: inviteSync.account, syncedUserCount: userSync.syncedUserCount, inviteCount: inviteSync.inviteCount })
+        await markAccountSpaceStatus(db, accountId, { code: 'normal', reason: '正常' })
+        results.push({
+          id: accountId,
+          ok: true,
+          account: {
+            ...inviteSync.account,
+            spaceStatusCode: 'normal',
+            spaceStatusReason: '正常',
+            spaceStatus: resolveSpaceStatus({ ...inviteSync.account, spaceStatusCode: 'normal', spaceStatusReason: '正常' })
+          },
+          syncedUserCount: userSync.syncedUserCount,
+          inviteCount: inviteSync.inviteCount
+        })
       } catch (error) {
+        if (isTokenInvalidSyncError(error)) {
+          await markAccountSpaceStatus(db, accountId, { code: 'abnormal', reason: 'Token 已过期或无效，请更新账号 token' })
+        }
         results.push({ id: accountId, ok: false, error: error?.message || '同步失败' })
       }
     }
@@ -794,9 +846,16 @@ router.post('/:id/sync-user-count', async (req, res) => {
       accountRecord: userSync.account,
       inviteListParams: { offset: 0, limit: 1, query: '' }
     })
+    const db = await getDatabase()
+    await markAccountSpaceStatus(db, accountId, { code: 'normal', reason: '正常' })
     res.json({
       message: '账号同步成功',
-      account: inviteSync.account,
+      account: {
+        ...inviteSync.account,
+        spaceStatusCode: 'normal',
+        spaceStatusReason: '正常',
+        spaceStatus: resolveSpaceStatus({ ...inviteSync.account, spaceStatusCode: 'normal', spaceStatusReason: '正常' })
+      },
       syncedUserCount: userSync.syncedUserCount,
       inviteCount: inviteSync.inviteCount,
       users: userSync.users
@@ -805,6 +864,10 @@ router.post('/:id/sync-user-count', async (req, res) => {
     console.error('同步账号人数错误:', error)
 
     if (error instanceof AccountSyncError || error.status) {
+      if (isTokenInvalidSyncError(error)) {
+        const db = await getDatabase()
+        await markAccountSpaceStatus(db, Number(req.params.id), { code: 'abnormal', reason: 'Token 已过期或无效，请更新账号 token' })
+      }
       return res.status(error.status || 500).json({ error: error.message })
     }
 
