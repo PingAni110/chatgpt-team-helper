@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted, nextTick, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { authService, gptAccountService, openaiOAuthService, userService, type GptAccount, type CreateGptAccountDto, type SyncUserCountResponse, type GptAccountsListParams, type ChatgptAccountInviteItem, type ChatgptAccountCheckInfo, type OpenAIOAuthSession, type OpenAIOAuthExchangeResult } from '@/services/api'
 import { formatShanghaiDate } from '@/lib/datetime'
 import { useAppConfigStore } from '@/stores/appConfig'
+import { buildSpaceTabQuery, createRequestGuard, readSpaceTabStorage, resolveInitialSpaceTab, resolveSpaceTab, writeSpaceTabStorage } from '@/lib/accounts-view-state'
 import {
   Card,
   CardContent,
@@ -31,6 +32,7 @@ import AppleNativeDateTimeInput from '@/components/ui/apple/NativeDateTimeInput.
 import { Plus, Eye, EyeOff, RefreshCw, Ban, FilePenLine, Trash2, AlertTriangle, X, FolderOpen, Search, CheckCircle2, AlertCircle, ArrowUp, ArrowDown, Users } from 'lucide-vue-next'
 
 const router = useRouter()
+const route = useRoute()
 const accounts = ref<GptAccount[]>([])
 const loading = ref(true)
 const error = ref('')
@@ -52,6 +54,7 @@ const dateFormatOptions = computed(() => ({
 
 const syncingAllAccounts = ref(false)
 const activeSpaceTab = ref<'normal' | 'abnormal'>('normal')
+const requestGuard = createRequestGuard()
 
 const resolveAccountStatus = (account: GptAccount) => {
   const status = account.spaceStatus
@@ -78,6 +81,16 @@ onMounted(async () => {
   if (!authService.isAuthenticated()) {
     router.push('/login')
     return
+  }
+
+  const initialTab = resolveInitialSpaceTab({
+    queryValue: route.query.spaceStatus,
+    storedValue: readSpaceTabStorage()
+  })
+  activeSpaceTab.value = initialTab
+  writeSpaceTabStorage(initialTab)
+  if (route.query.spaceStatus !== initialTab) {
+    router.replace({ query: buildSpaceTabQuery(route.query, initialTab) })
   }
 
   await loadAccounts()
@@ -525,6 +538,7 @@ const goToPage = (page: number) => {
 }
 
 const loadAccounts = async () => {
+  const requestId = requestGuard.nextId()
   try {
     loading.value = true
     error.value = ''
@@ -541,6 +555,7 @@ const loadAccounts = async () => {
       params.openStatus = openStatusFilter.value
     }
     const response = await gptAccountService.getAll(params)
+    if (!requestGuard.isLatest(requestId)) return
     const normalizedAccounts = (response.accounts || []).map((item: any) => {
       const source = item && typeof item === 'object' ? item : {}
       const expireAt = source.expireAt ?? source.expire_at ?? source.expireTime ?? source.expire_time ?? source.expiresAt ?? null
@@ -552,13 +567,16 @@ const loadAccounts = async () => {
     accounts.value = normalizedAccounts
     paginationMeta.value = response.pagination || { page: 1, pageSize: 10, total: 0 }
   } catch (err: any) {
+    if (!requestGuard.isLatest(requestId)) return
     error.value = err.response?.data?.error || 'Failed to load accounts'
     if (err.response?.status === 401 || err.response?.status === 403) {
       authService.logout()
       router.push('/login')
     }
   } finally {
-    loading.value = false
+    if (requestGuard.isLatest(requestId)) {
+      loading.value = false
+    }
   }
 }
 
@@ -567,6 +585,8 @@ const handleSpaceTabChange = (tab: 'normal' | 'abnormal') => {
   if (activeSpaceTab.value === tab) return
   activeSpaceTab.value = tab
   paginationMeta.value.page = 1
+  router.replace({ query: buildSpaceTabQuery(route.query, tab) })
+  writeSpaceTabStorage(tab)
 }
 
 const handleSearch = () => {
@@ -598,6 +618,17 @@ watch(searchQuery, () => {
     searchDebounceTimer = null
   }, 300)
 })
+
+watch(
+  () => route.query.spaceStatus,
+  (value) => {
+    const nextTab = resolveSpaceTab(value)
+    if (activeSpaceTab.value !== nextTab) {
+      activeSpaceTab.value = nextTab
+      writeSpaceTabStorage(nextTab)
+    }
+  }
+)
 
 watch(
   () => formData.value.chatgptAccountId,

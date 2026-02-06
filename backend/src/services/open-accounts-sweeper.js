@@ -4,9 +4,10 @@ import { formatProxyForLog, loadProxyList } from '../utils/proxy.js'
 import { AccountSyncError, deleteAccountUser, fetchAccountUsersList, syncAccountInviteCount, syncAccountUserCount } from './account-sync.js'
 import { sendOpenAccountsSweeperReportEmail } from './email-service.js'
 import { getFeatureFlags, isFeatureEnabled } from '../utils/feature-flags.js'
+import { SPACE_MEMBER_LIMIT } from '../utils/space-capacity.js'
 
 const DEFAULT_INTERVAL_HOURS = 1
-const DEFAULT_MAX_JOINED = 6
+const DEFAULT_MAX_JOINED = SPACE_MEMBER_LIMIT
 const DEFAULT_CREATED_WITHIN_DAYS = 30
 
 const toInt = (value, fallback) => {
@@ -53,62 +54,126 @@ const fetchAllStandardUsers = async (accountId, { proxy } = {}) => {
     if (offset > 2000) break
   }
 
-  return (items || []).filter(item => String(item.role || '').toLowerCase() === 'standard-user')
+  return {
+    total: typeof total === 'number' ? total : items.length,
+    items: (items || []).filter(item => String(item.role || '').toLowerCase() === 'standard-user')
+  }
+}
+
+export const sortUsersByJoinTimeDesc = (users) => {
+  return [...(users || [])].sort((a, b) => {
+    const diff = parseTime(b.created_time) - parseTime(a.created_time)
+    if (diff !== 0) return diff
+    return String(b.id || '').localeCompare(String(a.id || ''))
+  })
+}
+
+export const selectUsersToKick = ({ users, currentJoined, maxJoinedCount }) => {
+  const overflow = Math.max(0, Number(currentJoined || 0) - Number(maxJoinedCount || 0))
+  if (overflow <= 0) return []
+  const sorted = sortUsersByJoinTimeDesc(users)
+  return sorted.slice(0, overflow)
 }
 
 const enforceAccountCapacity = async (accountId, { maxJoinedCount, proxy } = {}) => {
   // Sync joined count first; the API's total is authoritative.
   const { account } = await syncAccountUserCount(accountId, { userListParams: { offset: 0, limit: 1, query: '' }, proxy })
-  const joined = Number(account?.userCount || 0)
+  let joined = Number(account?.userCount || 0)
+  const beforeJoined = joined
 
   if (joined <= maxJoinedCount) {
     // Still refresh invite count so card page stays reasonably up to date.
     await syncAccountInviteCount(accountId, { inviteListParams: { offset: 0, limit: 1, query: '' }, proxy })
-    return { kicked: 0, joined }
+    return { kicked: 0, joined, beforeJoined, kickedUsers: [], skippedUsers: [], failedUsers: [] }
+  }
+
+  let kicked = 0
+  const kickedUsers = []
+  const skippedUsers = []
+  const failedUsers = []
+
+  let attempt = 0
+  while (joined > maxJoinedCount && attempt < 3) {
+    const { items: candidates } = await fetchAllStandardUsers(accountId, { proxy })
+    if (candidates.length === 0) {
+      await syncAccountInviteCount(accountId, { inviteListParams: { offset: 0, limit: 1, query: '' }, proxy })
+      return { kicked, joined, beforeJoined, reason: 'no_standard_users', kickedUsers, skippedUsers, failedUsers }
+    }
+
+    const toKick = selectUsersToKick({ users: candidates, currentJoined: joined, maxJoinedCount })
+    if (toKick.length === 0) break
+
+    for (const user of toKick) {
+      if (joined <= maxJoinedCount) break
+      try {
+        const deleteResult = await deleteAccountUser(accountId, user.id, { userListParams: { offset: 0, limit: 1, query: '' }, proxy })
+        const email = String(user.email || '').trim().toLowerCase()
+        if (email) {
+          const db = await getDatabase()
+          db.run(
+            `
+              UPDATE linuxdo_users
+              SET current_open_account_id = NULL,
+                  current_open_account_email = NULL,
+                  updated_at = DATETIME('now', 'localtime')
+              WHERE current_open_account_id = ?
+                AND (lower(email) = ? OR lower(current_open_account_email) = ?)
+            `,
+            [accountId, email, email]
+          )
+          saveDatabase()
+        }
+        kicked += 1
+        joined = Number(deleteResult?.syncedUserCount || deleteResult?.account?.userCount || Math.max(0, joined - 1))
+        kickedUsers.push({
+          id: user.id,
+          email: user.email,
+          joinedAt: user.created_time || null
+        })
+      } catch (error) {
+        const status = error instanceof AccountSyncError ? error.status : undefined
+        if (status === 404) {
+          skippedUsers.push({
+            id: user.id,
+            email: user.email,
+            joinedAt: user.created_time || null,
+            reason: 'not_found'
+          })
+          continue
+        }
+        failedUsers.push({
+          id: user.id,
+          email: user.email,
+          joinedAt: user.created_time || null,
+          status,
+          message: error?.message || String(error)
+        })
+        console.warn('[OpenAccountsSweeper] kick failed', { accountId, userId: user?.id, status, message: error?.message || String(error) })
+        break
+      }
+    }
+
+    const refreshed = await syncAccountUserCount(accountId, { userListParams: { offset: 0, limit: 1, query: '' }, proxy })
+    joined = Number(refreshed?.account?.userCount || joined)
+    attempt += 1
+  }
+
+  if (joined <= maxJoinedCount) {
+    await syncAccountInviteCount(accountId, { inviteListParams: { offset: 0, limit: 1, query: '' }, proxy })
+    return { kicked, joined, beforeJoined, kickedUsers, skippedUsers, failedUsers }
   }
 
   const candidates = await fetchAllStandardUsers(accountId, { proxy })
-  if (candidates.length === 0) {
+  if ((candidates?.items || []).length === 0) {
     await syncAccountInviteCount(accountId, { inviteListParams: { offset: 0, limit: 1, query: '' }, proxy })
-    return { kicked: 0, joined, reason: 'no_standard_users' }
-  }
-
-  const sortedByJoinTimeDesc = [...candidates].sort((a, b) => parseTime(b.created_time) - parseTime(a.created_time))
-  const toKick = sortedByJoinTimeDesc.slice(0, Math.max(0, joined - maxJoinedCount))
-
-  let kicked = 0
-  for (const user of toKick) {
-    try {
-      await deleteAccountUser(accountId, user.id, { userListParams: { offset: 0, limit: 1, query: '' }, proxy })
-      const email = String(user.email || '').trim().toLowerCase()
-	      if (email) {
-	        const db = await getDatabase()
-	        db.run(
-	          `
-	            UPDATE linuxdo_users
-	            SET current_open_account_id = NULL,
-	                current_open_account_email = NULL,
-	                updated_at = DATETIME('now', 'localtime')
-	            WHERE current_open_account_id = ?
-	              AND (lower(email) = ? OR lower(current_open_account_email) = ?)
-	          `,
-	          [accountId, email, email]
-	        )
-	        saveDatabase()
-	      }
-      kicked += 1
-    } catch (error) {
-      const status = error instanceof AccountSyncError ? error.status : undefined
-      console.warn('[OpenAccountsSweeper] kick failed', { accountId, userId: user?.id, status, message: error?.message || String(error) })
-      break
-    }
+    return { kicked, joined, beforeJoined, reason: 'no_standard_users', kickedUsers, skippedUsers, failedUsers }
   }
 
   // Refresh counts for card page after kicking.
   const { account: updatedAccount } = await syncAccountUserCount(accountId, { userListParams: { offset: 0, limit: 1, query: '' }, proxy })
   await syncAccountInviteCount(accountId, { inviteListParams: { offset: 0, limit: 1, query: '' }, proxy })
 
-  return { kicked, joined: Number(updatedAccount?.userCount || 0) }
+  return { kicked, joined: Number(updatedAccount?.userCount || 0), beforeJoined, kickedUsers, skippedUsers, failedUsers }
 }
 
 export const startOpenAccountsOvercapacitySweeper = () => {
@@ -167,17 +232,32 @@ export const startOpenAccountsOvercapacitySweeper = () => {
               const outcome = await enforceAccountCapacity(id, { maxJoinedCount: max, proxy })
               const kicked = Number(outcome?.kicked || 0)
               const joined = Number(outcome?.joined || 0)
+              const beforeJoined = Number(outcome?.beforeJoined || joined)
               const didKick = kicked > 0
               totalKicked += kicked
               results.push({
                 accountId: id,
                 emailPrefix,
+                beforeJoined,
                 joined,
                 didKick,
                 kicked,
+                kickedUsers: outcome?.kickedUsers || [],
+                skippedUsers: outcome?.skippedUsers || [],
+                failedUsers: outcome?.failedUsers || [],
                 note: outcome?.reason === 'no_standard_users' ? '无可踢用户' : (kicked ? '超员已处理' : '')
               })
-              if (kicked) console.log('[OpenAccountsSweeper] kicked', { accountId: id, count: kicked })
+              if (kicked || (outcome?.failedUsers || []).length > 0) {
+                console.log('[OpenAccountsSweeper] kicked', {
+                  accountId: id,
+                  beforeJoined,
+                  afterJoined: joined,
+                  maxJoined: max,
+                  kicked,
+                  kickedUsers: outcome?.kickedUsers || [],
+                  failedUsers: outcome?.failedUsers || []
+                })
+              }
             } catch (error) {
               console.error('[OpenAccountsSweeper] sweep error', {
                 accountId: id,
