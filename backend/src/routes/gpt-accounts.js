@@ -107,17 +107,21 @@ const isTokenInvalidSyncError = (error) => {
 const markAccountSpaceStatus = async (db, accountId, { code, reason = '' } = {}) => {
   const normalizedCode = String(code || '').trim().toLowerCase() === 'abnormal' ? 'abnormal' : 'normal'
   const normalizedReason = String(reason || '').trim()
-  db.run(
-    `
-      UPDATE gpt_accounts
-      SET space_status_code = ?,
-          space_status_reason = ?,
-          updated_at = DATETIME('now', 'localtime')
-      WHERE id = ?
-    `,
-    [normalizedCode, normalizedReason || null, accountId]
-  )
-  saveDatabase()
+  try {
+    db.run(
+      `
+        UPDATE gpt_accounts
+        SET space_status_code = ?,
+            space_status_reason = ?,
+            updated_at = DATETIME('now', 'localtime')
+        WHERE id = ?
+      `,
+      [normalizedCode, normalizedReason || null, accountId]
+    )
+    saveDatabase()
+  } catch (error) {
+    console.warn('[GptAccounts] skip space status update (legacy schema):', error?.message || error)
+  }
 }
 
 const collectEmails = (payload) => {
