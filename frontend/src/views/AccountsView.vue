@@ -4,20 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { authService, gptAccountService, openaiOAuthService, userService, type GptAccount, type CreateGptAccountDto, type SyncUserCountResponse, type GptAccountsListParams, type ChatgptAccountInviteItem, type ChatgptAccountCheckInfo, type OpenAIOAuthSession, type OpenAIOAuthExchangeResult } from '@/services/api'
 import { formatShanghaiDate } from '@/lib/datetime'
 import { useAppConfigStore } from '@/stores/appConfig'
-import { buildSpaceTabQuery, createRequestGuard, readSpaceTabStorage, resolveInitialSpaceTab, resolveSpaceTab, writeSpaceTabStorage } from '@/lib/accounts-view-state'
-import {
-  buildSpaceTabQuery,
-  buildSpaceTypeQuery,
-  createRequestGuard,
-  readSpaceTabStorage,
-  readSpaceTypeStorage,
-  resolveInitialSpaceTab,
-  resolveInitialSpaceType,
-  resolveSpaceTab,
-  resolveSpaceType,
-  writeSpaceTabStorage,
-  writeSpaceTypeStorage
-} from '@/lib/accounts-view-state'
+import { buildSpaceTabQuery, buildSpaceTypeQuery, createRequestGuard, readSpaceTabStorage, readSpaceTypeStorage, resolveInitialSpaceTab, resolveInitialSpaceType, resolveSpaceTab, resolveSpaceType, writeSpaceTabStorage, writeSpaceTypeStorage } from '@/lib/accounts-view-state'
 import {
   Card,
   CardContent,
@@ -638,7 +625,9 @@ watch(spaceTypeFilter, () => {
     clearTimeout(searchDebounceTimer)
     searchDebounceTimer = null
   }
-  router.replace({ query: buildSpaceTypeQuery(route.query, spaceTypeFilter.value) })
+  if (route.query.spaceType !== spaceTypeFilter.value) {
+    router.replace({ query: buildSpaceTypeQuery(route.query, spaceTypeFilter.value) })
+  }
   writeSpaceTypeStorage(spaceTypeFilter.value)
   loadAccounts()
 })
