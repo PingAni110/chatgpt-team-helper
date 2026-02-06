@@ -4,7 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { authService, gptAccountService, openaiOAuthService, userService, type GptAccount, type CreateGptAccountDto, type SyncUserCountResponse, type GptAccountsListParams, type ChatgptAccountInviteItem, type ChatgptAccountCheckInfo, type OpenAIOAuthSession, type OpenAIOAuthExchangeResult } from '@/services/api'
 import { formatShanghaiDate } from '@/lib/datetime'
 import { useAppConfigStore } from '@/stores/appConfig'
-import { buildSpaceTabQuery, buildSpaceTypeQuery, createRequestGuard, readSpaceTabStorage, readSpaceTypeStorage, resolveInitialSpaceTab, resolveInitialSpaceType, resolveSpaceTab, resolveSpaceType, writeSpaceTabStorage, writeSpaceTypeStorage } from '@/lib/accounts-view-state'
+import { buildSpaceTabQuery, createRequestGuard, readSpaceTabStorage, resolveInitialSpaceTab, resolveSpaceTab, writeSpaceTabStorage } from '@/lib/accounts-view-state'
 import {
   Card,
   CardContent,
@@ -43,7 +43,6 @@ const paginationMeta = ref({ page: 1, pageSize: 10, total: 0 })
 // 搜索和筛选状态
 const searchQuery = ref('')
 const openStatusFilter = ref<'all' | 'open' | 'closed'>('all')
-const spaceTypeFilter = ref<'mother' | 'child'>('child')
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
 const { success: showSuccessToast, error: showErrorToast, warning: showWarningToast, info: showInfoToast } = useToast()
 const appConfigStore = useAppConfigStore()
@@ -88,16 +87,10 @@ onMounted(async () => {
     queryValue: route.query.spaceStatus,
     storedValue: readSpaceTabStorage()
   })
-  const initialSpaceType = resolveInitialSpaceType({
-    queryValue: route.query.spaceType,
-    storedValue: readSpaceTypeStorage()
-  })
   activeSpaceTab.value = initialTab
-  spaceTypeFilter.value = initialSpaceType
   writeSpaceTabStorage(initialTab)
-  writeSpaceTypeStorage(initialSpaceType)
-  const mergedQuery = buildSpaceTabQuery(buildSpaceTypeQuery(route.query, initialSpaceType), initialTab)
-  if (route.query.spaceStatus !== initialTab || route.query.spaceType !== initialSpaceType) {
+  const mergedQuery = buildSpaceTabQuery(route.query, initialTab)
+  if (route.query.spaceStatus !== initialTab) {
     router.replace({ query: mergedQuery })
   }
 
@@ -563,7 +556,6 @@ const loadAccounts = async () => {
     if (openStatusFilter.value !== 'all') {
       params.openStatus = openStatusFilter.value
     }
-    params.spaceType = spaceTypeFilter.value
     const response = await gptAccountService.getAll(params)
     if (!requestGuard.isLatest(requestId)) return
     const normalizedAccounts = (response.accounts || []).map((item: any) => {
@@ -619,19 +611,6 @@ watch(openStatusFilter, () => {
   loadAccounts()
 })
 
-watch(spaceTypeFilter, () => {
-  paginationMeta.value.page = 1
-  if (searchDebounceTimer) {
-    clearTimeout(searchDebounceTimer)
-    searchDebounceTimer = null
-  }
-  if (route.query.spaceType !== spaceTypeFilter.value) {
-    router.replace({ query: buildSpaceTypeQuery(route.query, spaceTypeFilter.value) })
-  }
-  writeSpaceTypeStorage(spaceTypeFilter.value)
-  loadAccounts()
-})
-
 watch(searchQuery, () => {
   paginationMeta.value.page = 1
   if (searchDebounceTimer) {
@@ -654,16 +633,6 @@ watch(
   }
 )
 
-watch(
-  () => route.query.spaceType,
-  (value) => {
-    const nextType = resolveSpaceType(value)
-    if (spaceTypeFilter.value !== nextType) {
-      spaceTypeFilter.value = nextType
-      writeSpaceTypeStorage(nextType)
-    }
-  }
-)
 
 watch(
   () => formData.value.chatgptAccountId,
@@ -1159,16 +1128,6 @@ const handleInviteSubmit = async () => {
           </SelectContent>
         </Select>
 
-        <Select v-model="spaceTypeFilter">
-          <SelectTrigger class="h-11 w-[140px] bg-white border-transparent shadow-[0_2px_10px_rgba(0,0,0,0.03)] rounded-xl">
-            <SelectValue placeholder="空间归属" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="child">子号</SelectItem>
-            <SelectItem value="mother">母号</SelectItem>
-          </SelectContent>
-        </Select>
-
       </div>
     </div>
 
@@ -1220,7 +1179,6 @@ const handleInviteSubmit = async () => {
                 <th class="px-6 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">ID</th>
                 <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">排序</th>
                 <th class="px-6 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">邮箱</th>
-                <th class="px-6 py-5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">空间归属</th>
                 <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">已加入</th>
                 <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">待加入</th>
                 <th class="px-6 py-5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">降级</th>
@@ -1256,14 +1214,6 @@ const handleInviteSubmit = async () => {
 	                    </span>
 	                  </div>
 	                </td>
-                <td class="px-6 py-5">
-                  <span
-                    class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border"
-                    :class="account.spaceType === 'mother' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' : 'bg-slate-50 text-slate-700 border-slate-100'"
-                  >
-                    {{ account.spaceType === 'mother' ? '母号空间' : '子号空间' }}
-                  </span>
-                </td>
                 <td class="px-6 py-5 text-center">
                   <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-100">
                     {{ account.userCount }} 人
@@ -1391,12 +1341,6 @@ const handleInviteSubmit = async () => {
               <div class="flex flex-wrap justify-end gap-2">
                  <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-100">
                     {{ account.userCount }} 人
-                 </span>
-                 <span
-                   class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border"
-                   :class="account.spaceType === 'mother' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' : 'bg-slate-50 text-slate-700 border-slate-100'"
-                 >
-                   {{ account.spaceType === 'mother' ? '母号' : '子号' }}
                  </span>
                  <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-purple-50 text-purple-600 border border-purple-100">
                     {{ account.inviteCount ?? 0 }} 待
@@ -1717,7 +1661,7 @@ const handleInviteSubmit = async () => {
 
                   <div class="grid grid-cols-2 gap-4">
                     <div class="space-y-2">
-                      <Label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">空间归属</Label>
+                      <Label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">空间类型</Label>
                       <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-xl">
                         <button
                           type="button"
