@@ -86,10 +86,33 @@ function buildOpenAccountsSweeperBody(summary) {
   const rows = (results || [])
     .map(item => {
       const emailPrefix = String(item.emailPrefix || '')
+      const beforeJoined = item.beforeJoined ?? '未知'
       const joined = item.joined ?? '未知'
       const kicked = Number(item.kicked || 0)
       const didKick = Boolean(item.didKick) || kicked > 0
-      return `<tr><td>${emailPrefix}</td><td style="text-align:right;">${joined}</td><td style="text-align:center;">${didKick ? '是' : '否'}</td><td style="text-align:right;">${kicked}</td></tr>`
+      const kickedUsers = Array.isArray(item.kickedUsers) ? item.kickedUsers : []
+      const failedUsers = Array.isArray(item.failedUsers) ? item.failedUsers : []
+      const skippedUsers = Array.isArray(item.skippedUsers) ? item.skippedUsers : []
+      const kickedDetail = kickedUsers.length
+        ? kickedUsers
+            .map(user => {
+              const label = user.email || user.id || 'unknown'
+              const time = user.joinedAt ? `@${user.joinedAt}` : ''
+              return `${label}${time}`
+            })
+            .join('<br/>')
+        : '—'
+      const failureDetail = failedUsers.length
+        ? failedUsers.map(user => `${user.email || user.id || 'unknown'}(${user.message || '失败'})`).join('<br/>')
+        : ''
+      const skippedDetail = skippedUsers.length
+        ? skippedUsers.map(user => `${user.email || user.id || 'unknown'}(已移除)`).join('<br/>')
+        : ''
+      const detailParts = [kickedDetail]
+      if (failureDetail) detailParts.push(`<span style="color:#d00">失败：${failureDetail}</span>`)
+      if (skippedDetail) detailParts.push(`<span style="color:#888">跳过：${skippedDetail}</span>`)
+      const details = detailParts.join('<br/>')
+      return `<tr><td>${emailPrefix}</td><td style="text-align:right;">${beforeJoined}</td><td style="text-align:right;">${joined}</td><td style="text-align:center;">${didKick ? '是' : '否'}</td><td style="text-align:right;">${kicked}</td><td>${details}</td></tr>`
     })
     .join('')
 
@@ -105,8 +128,8 @@ function buildOpenAccountsSweeperBody(summary) {
     `<p>扫描账号数：${scannedCount ?? 0}，阈值：joined &gt; ${maxJoined ?? ''}，本次踢出：${totalKicked ?? 0}</p>`,
     ...(Number(scanCreatedWithinDays) > 0 ? [`<p>扫描范围：最近 ${scanCreatedWithinDays} 天创建的开放账号</p>`] : []),
     '<table style="border-collapse:collapse;width:100%;">',
-    '<thead><tr><th style="text-align:left;border-bottom:1px solid #ccc;">邮箱前缀</th><th style="text-align:right;border-bottom:1px solid #ccc;">当前人数</th><th style="text-align:center;border-bottom:1px solid #ccc;">是否踢出</th><th style="text-align:right;border-bottom:1px solid #ccc;">踢出人数</th></tr></thead>',
-    `<tbody>${rows || '<tr><td colspan="4">无</td></tr>'}</tbody>`,
+    '<thead><tr><th style="text-align:left;border-bottom:1px solid #ccc;">邮箱前缀</th><th style="text-align:right;border-bottom:1px solid #ccc;">触发前人数</th><th style="text-align:right;border-bottom:1px solid #ccc;">踢出后人数</th><th style="text-align:center;border-bottom:1px solid #ccc;">是否踢出</th><th style="text-align:right;border-bottom:1px solid #ccc;">踢出人数</th><th style="text-align:left;border-bottom:1px solid #ccc;">踢出明细</th></tr></thead>',
+    `<tbody>${rows || '<tr><td colspan="6">无</td></tr>'}</tbody>`,
     '</table>'
   ]
 
@@ -127,10 +150,23 @@ function buildOpenAccountsSweeperBody(summary) {
       ? results
           .map(item => {
             const emailPrefix = String(item.emailPrefix || '')
+            const beforeJoined = item.beforeJoined ?? '未知'
             const joined = item.joined ?? '未知'
             const kicked = Number(item.kicked || 0)
             const didKick = Boolean(item.didKick) || kicked > 0
-            return `- ${emailPrefix}: 当前人数=${joined} 是否踢出=${didKick ? '是' : '否'} 踢出人数=${kicked}`
+            const kickedUsers = Array.isArray(item.kickedUsers) ? item.kickedUsers : []
+            const failedUsers = Array.isArray(item.failedUsers) ? item.failedUsers : []
+            const skippedUsers = Array.isArray(item.skippedUsers) ? item.skippedUsers : []
+            const kickedDetail = kickedUsers.length
+              ? kickedUsers.map(user => `${user.email || user.id || 'unknown'}${user.joinedAt ? `@${user.joinedAt}` : ''}`).join(', ')
+              : '—'
+            const failedDetail = failedUsers.length
+              ? `  失败: ${failedUsers.map(user => `${user.email || user.id || 'unknown'}(${user.message || '失败'})`).join(', ')}`
+              : ''
+            const skippedDetail = skippedUsers.length
+              ? `  跳过: ${skippedUsers.map(user => `${user.email || user.id || 'unknown'}(已移除)`).join(', ')}`
+              : ''
+            return `- ${emailPrefix}: 触发前=${beforeJoined} 踢出后=${joined} 是否踢出=${didKick ? '是' : '否'} 踢出人数=${kicked} 踢出明细=${kickedDetail}${failedDetail}${skippedDetail}`
           })
           .join('\n')
       : '无'
