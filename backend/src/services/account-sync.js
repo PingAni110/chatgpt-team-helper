@@ -1,6 +1,7 @@
 import { getDatabase, saveDatabase } from '../database/init.js'
 import axios from 'axios'
 import { loadProxyList, parseProxyConfig } from '../utils/proxy.js'
+import { SPACE_MEMBER_LIMIT, hasAvailableSeat } from '../utils/space-capacity.js'
 
 export class AccountSyncError extends Error {
   constructor(message, status = 500) {
@@ -80,8 +81,9 @@ function mapRowToAccount(row) {
     isOpen: Boolean(row[9]),
     isDemoted: Boolean(row[10]),
     isBanned: Boolean(row[11]),
-    createdAt: row[12],
-    updatedAt: row[13]
+    spaceType: row[12] || 'child',
+    createdAt: row[13],
+    updatedAt: row[14]
   }
 }
 
@@ -91,6 +93,7 @@ async function fetchAccountById(db, accountId) {
     SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
            COALESCE(is_demoted, 0) AS is_demoted,
            COALESCE(is_banned, 0) AS is_banned,
+           COALESCE(space_type, 'child') AS space_type,
            created_at, updated_at
     FROM gpt_accounts
     WHERE id = ?
@@ -111,6 +114,7 @@ export async function fetchAllAccounts() {
     SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
            COALESCE(is_demoted, 0) AS is_demoted,
            COALESCE(is_banned, 0) AS is_banned,
+           COALESCE(space_type, 'child') AS space_type,
            created_at, updated_at
     FROM gpt_accounts
     ORDER BY created_at DESC
@@ -819,6 +823,10 @@ export async function inviteAccountUser(accountId, email, options = {}) {
 
   if (!account.token || !account.chatgptAccountId) {
     throw new AccountSyncError('账号信息不完整，缺少 token 或 chatgpt_account_id', 400)
+  }
+
+  if (!hasAvailableSeat({ userCount: account.userCount, inviteCount: account.inviteCount, limit: SPACE_MEMBER_LIMIT })) {
+    throw new AccountSyncError(`该空间已满员（${SPACE_MEMBER_LIMIT} 人），无法继续邀请成员`, 400)
   }
 
   const apiUrl = `https://chatgpt.com/backend-api/accounts/${account.chatgptAccountId}/invites`
