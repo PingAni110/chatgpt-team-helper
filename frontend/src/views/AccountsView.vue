@@ -4,7 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { authService, gptAccountService, openaiOAuthService, userService, type GptAccount, type CreateGptAccountDto, type SyncUserCountResponse, type GptAccountsListParams, type ChatgptAccountInviteItem, type ChatgptAccountCheckInfo, type OpenAIOAuthSession, type OpenAIOAuthExchangeResult } from '@/services/api'
 import { formatShanghaiDate } from '@/lib/datetime'
 import { useAppConfigStore } from '@/stores/appConfig'
-import { buildSpaceTabQuery, createRequestGuard, readSpaceTabStorage, resolveInitialSpaceTab, resolveSpaceTab, writeSpaceTabStorage } from '@/lib/accounts-view-state'
+import { buildSpaceTabQuery, buildSpaceTypeQuery, createRequestGuard, readSpaceTabStorage, readSpaceTypeStorage, resolveInitialSpaceTab, resolveInitialSpaceType, resolveSpaceTab, resolveSpaceType, writeSpaceTabStorage, writeSpaceTypeStorage } from '@/lib/accounts-view-state'
 import {
   Card,
   CardContent,
@@ -43,6 +43,7 @@ const paginationMeta = ref({ page: 1, pageSize: 10, total: 0 })
 // 搜索和筛选状态
 const searchQuery = ref('')
 const openStatusFilter = ref<'all' | 'open' | 'closed'>('all')
+const spaceTypeFilter = ref<'mother' | 'child'>('child')
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
 const { success: showSuccessToast, error: showErrorToast, warning: showWarningToast, info: showInfoToast } = useToast()
 const appConfigStore = useAppConfigStore()
@@ -89,8 +90,14 @@ onMounted(async () => {
   })
   activeSpaceTab.value = initialTab
   writeSpaceTabStorage(initialTab)
-  const mergedQuery = buildSpaceTabQuery(route.query, initialTab)
-  if (route.query.spaceStatus !== initialTab) {
+  const initialSpaceType = resolveInitialSpaceType({
+    queryValue: route.query.spaceType,
+    storedValue: readSpaceTypeStorage()
+  })
+  spaceTypeFilter.value = initialSpaceType
+  writeSpaceTypeStorage(initialSpaceType)
+  const mergedQuery = buildSpaceTypeQuery(buildSpaceTabQuery(route.query, initialTab), initialSpaceType)
+  if (route.query.spaceStatus !== initialTab || route.query.spaceType !== initialSpaceType) {
     router.replace({ query: mergedQuery })
   }
 
@@ -556,6 +563,7 @@ const loadAccounts = async () => {
     if (openStatusFilter.value !== 'all') {
       params.openStatus = openStatusFilter.value
     }
+    params.spaceType = spaceTypeFilter.value
     const response = await gptAccountService.getAll(params)
     if (!requestGuard.isLatest(requestId)) return
     const normalizedAccounts = (response.accounts || []).map((item: any) => {
@@ -611,6 +619,17 @@ watch(openStatusFilter, () => {
   loadAccounts()
 })
 
+watch(spaceTypeFilter, (value) => {
+  paginationMeta.value.page = 1
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+    searchDebounceTimer = null
+  }
+  writeSpaceTypeStorage(value)
+  router.replace({ query: buildSpaceTypeQuery(route.query, value) })
+  loadAccounts()
+})
+
 watch(searchQuery, () => {
   paginationMeta.value.page = 1
   if (searchDebounceTimer) {
@@ -629,6 +648,17 @@ watch(
     if (activeSpaceTab.value !== nextTab) {
       activeSpaceTab.value = nextTab
       writeSpaceTabStorage(nextTab)
+    }
+  }
+)
+
+watch(
+  () => route.query.spaceType,
+  (value) => {
+    const nextType = resolveSpaceType(value)
+    if (spaceTypeFilter.value !== nextType) {
+      spaceTypeFilter.value = nextType
+      writeSpaceTypeStorage(nextType)
     }
   }
 )
@@ -1125,6 +1155,16 @@ const handleInviteSubmit = async () => {
             <SelectItem value="all">全部状态</SelectItem>
             <SelectItem value="open">已开放</SelectItem>
             <SelectItem value="closed">未开放</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select v-model="spaceTypeFilter">
+          <SelectTrigger class="h-11 w-[140px] bg-white border-transparent shadow-[0_2px_10px_rgba(0,0,0,0.03)] rounded-xl">
+            <SelectValue placeholder="空间归属" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="child">子空间</SelectItem>
+            <SelectItem value="mother">母空间</SelectItem>
           </SelectContent>
         </Select>
 
