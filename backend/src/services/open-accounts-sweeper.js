@@ -7,7 +7,7 @@ import { getFeatureFlags, isFeatureEnabled } from '../utils/feature-flags.js'
 
 const DEFAULT_INTERVAL_HOURS = 1
 const DEFAULT_MAX_JOINED = 6
-const DEFAULT_CREATED_WITHIN_DAYS = 15
+const DEFAULT_CREATED_WITHIN_DAYS = 30
 
 const toInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10)

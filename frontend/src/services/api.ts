@@ -277,6 +277,8 @@ export interface GptAccount {
   chatgptAccountId?: string
   oaiDeviceId?: string
   expireAt?: string | null
+  sortOrder?: number
+  spaceStatus?: { code: 'normal' | 'abnormal'; reason: string }
   createdAt: string
   updatedAt: string
 }
@@ -336,6 +338,19 @@ export interface ChatgptAccountInvitesResponse {
   total: number
   limit: number
   offset: number
+}
+
+export interface SyncAllAccountsResponse {
+  message: string
+  total: number
+  results: Array<{
+    id: number
+    ok: boolean
+    account?: GptAccount
+    syncedUserCount?: number
+    inviteCount?: number
+    error?: string
+  }>
 }
 
 export interface SyncUserCountResponse {
@@ -419,6 +434,13 @@ export interface PurchaseMeta {
   plans?: PurchasePlan[]
 }
 
+export type PurchaseFeatureType = 'normal' | 'warn'
+
+export interface PurchaseFeatureItem {
+  type: PurchaseFeatureType
+  text: string
+}
+
 export interface PurchasePlan {
   key: PurchaseOrderType
   productName: string
@@ -427,6 +449,12 @@ export interface PurchasePlan {
   availableCount: number
   buyerRewardPoints?: number
   inviteRewardPoints?: number
+  badge?: string
+  features?: PurchaseFeatureItem[]
+  description?: string
+  purchaseNotes?: string[]
+  status?: 'enabled' | 'disabled'
+  sortOrder?: number
 }
 
 export interface PurchaseCreateOrderResponse {
@@ -462,6 +490,45 @@ export interface PurchaseOrder {
   refundAmount?: string | null
   refundMessage?: string | null
   emailSentAt?: string | null
+}
+
+
+export interface PurchaseAdminProductItem {
+  id: number
+  orderType: PurchaseOrderType
+  title: string
+  price: string
+  durationDays: number
+  badge: string
+  features: PurchaseFeatureItem[]
+  description?: string
+  purchaseNotes: string[]
+  status: 'enabled' | 'disabled'
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PurchaseAdminProductsResponse {
+  items: PurchaseAdminProductItem[]
+  pagination: {
+    page: number
+    pageSize: number
+    total: number
+  }
+}
+
+export interface PurchaseAdminProductCreatePayload {
+  orderType: PurchaseOrderType
+  title: string
+  price: string
+  durationDays: number
+  badge: string
+  features: PurchaseFeatureItem[]
+  description?: string
+  purchaseNotes?: string[]
+  status?: 'enabled' | 'disabled'
+  sortOrder?: number
 }
 
 export interface PurchaseOrderQueryResponse {
@@ -1362,6 +1429,16 @@ export const gptAccountService = {
     return response.data
   },
 
+  async syncAll(): Promise<SyncAllAccountsResponse> {
+    const response = await api.post('/gpt-accounts/sync-all')
+    return response.data
+  },
+
+  async reorder(ids: number[]): Promise<{ message: string }> {
+    const response = await api.patch('/gpt-accounts/reorder', { ids })
+    return response.data
+  },
+
   async deleteAccountUser(accountId: number, userId: string): Promise<SyncUserCountResponse> {
     const response = await api.delete(`/gpt-accounts/${accountId}/users/${encodeURIComponent(userId)}`)
     return response.data
@@ -1948,6 +2025,37 @@ export const purchaseService = {
 
   async adminGetOrder(orderNo: string): Promise<{ order: any }> {
     const response = await api.get(`/purchase/admin/orders/${encodeURIComponent(orderNo)}`)
+    return response.data
+  },
+
+
+  async adminListProducts(params?: { page?: number; pageSize?: number; search?: string; status?: 'all' | 'enabled' | 'disabled' }): Promise<PurchaseAdminProductsResponse> {
+    const response = await api.get('/purchase/admin/products', { params })
+    return response.data
+  },
+
+  async adminCreateProduct(payload: PurchaseAdminProductCreatePayload): Promise<{ item: PurchaseAdminProductItem }> {
+    const response = await api.post('/purchase/admin/products', payload)
+    return response.data
+  },
+
+  async adminUpdateProduct(id: number, payload: Partial<PurchaseAdminProductCreatePayload>): Promise<{ item: PurchaseAdminProductItem }> {
+    const response = await api.put(`/purchase/admin/products/${id}`, payload)
+    return response.data
+  },
+
+  async adminToggleProductStatus(id: number, status: 'enabled' | 'disabled'): Promise<{ item: PurchaseAdminProductItem }> {
+    const response = await api.patch(`/purchase/admin/products/${id}/status`, { status })
+    return response.data
+  },
+
+  async adminDeleteProduct(id: number): Promise<{ message: string }> {
+    const response = await api.delete(`/purchase/admin/products/${id}`)
+    return response.data
+  },
+
+  async adminReorderProducts(ids: number[]): Promise<{ items: PurchaseAdminProductItem[] }> {
+    const response = await api.patch('/purchase/admin/products/reorder', { ids })
     return response.data
   },
 

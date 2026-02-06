@@ -1,6 +1,7 @@
 import { getDatabase, saveDatabase } from '../database/init.js'
 import axios from 'axios'
 import { loadProxyList, parseProxyConfig } from '../utils/proxy.js'
+import { SPACE_MEMBER_LIMIT, hasAvailableSeat } from '../utils/space-capacity.js'
 
 export class AccountSyncError extends Error {
   constructor(message, status = 500) {
@@ -819,6 +820,10 @@ export async function inviteAccountUser(accountId, email, options = {}) {
 
   if (!account.token || !account.chatgptAccountId) {
     throw new AccountSyncError('账号信息不完整，缺少 token 或 chatgpt_account_id', 400)
+  }
+
+  if (!hasAvailableSeat({ userCount: account.userCount, inviteCount: account.inviteCount, limit: SPACE_MEMBER_LIMIT })) {
+    throw new AccountSyncError(`该空间已满员（${SPACE_MEMBER_LIMIT} 人），无法继续邀请成员`, 400)
   }
 
   const apiUrl = `https://chatgpt.com/backend-api/accounts/${account.chatgptAccountId}/invites`
