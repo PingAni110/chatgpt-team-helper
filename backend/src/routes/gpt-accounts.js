@@ -94,6 +94,11 @@ const resolveSpaceStatus = (account) => {
     return { code: 'abnormal', reason: 'Token 失效' }
   }
 
+  const userCount = Number(account?.userCount ?? account?.user_count ?? 0)
+  if (Number.isFinite(userCount) && userCount > SPACE_MEMBER_LIMIT) {
+    return { code: 'abnormal', reason: `超员（${userCount}/${SPACE_MEMBER_LIMIT}）` }
+  }
+
   return { code: 'normal', reason: statusReason || '正常' }
 }
 
