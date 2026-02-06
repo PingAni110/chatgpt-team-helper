@@ -87,11 +87,8 @@
             <h4 class="text-[13px] font-semibold text-[#86868b] uppercase tracking-wider mb-4">购买须知</h4>
             <ul class="space-y-3 text-[14px] text-[#1d1d1f]/70 dark:text-white/70">
               <li v-for="(item, idx) in notes" :key="idx" class="flex items-start gap-3">
-                <span
-                  class="h-1.5 w-1.5 rounded-full mt-2 flex-shrink-0"
-                  :class="item.highlight ? 'bg-[#FF3B30]' : 'bg-[#007AFF]'"
-                ></span>
-                <span :class="item.highlight ? 'text-[#FF3B30] font-medium' : ''">{{ item.text }}</span>
+                <span class="h-1.5 w-1.5 rounded-full mt-2 flex-shrink-0 bg-[#007AFF]"></span>
+                <span>{{ item }}</span>
               </li>
             </ul>
           </div>
@@ -157,40 +154,29 @@ const tagline = computed(() => {
   return '请选择商品后查看购买说明。'
 })
 
-interface NoteItem {
-  text: string
-  highlight?: boolean
-}
+const notes = computed<string[]>(() => {
+  const purchaseNotes = Array.isArray(plan.value?.purchaseNotes)
+    ? plan.value.purchaseNotes.map(item => String(item || '').trim()).filter(Boolean)
+    : []
+  if (purchaseNotes.length > 0) return purchaseNotes
 
-const notes = computed<NoteItem[]>(() => {
-  const common: NoteItem[] = [
-    { text: '订单信息将发送至填写的邮箱，请确认邮箱可正常收信。' },
-    { text: '支付成功后系统自动处理，无需手动兑换。' },
-    { text: '如未收到邮件请检查垃圾箱，或使用"查询订单"页进行订单查询。' }
+  // 兼容旧数据：purchaseNotes 缺失时回退到历史文案
+  const common = [
+    '订单信息将发送至填写的邮箱，请确认邮箱可正常收信。',
+    '支付成功后系统自动处理，无需手动兑换。',
+    '如未收到邮件请检查垃圾箱，或使用"查询订单"页进行订单查询。'
   ]
 
   if (planKey.value === 'no_warranty') {
-    return [
-      { text: '无质保：不支持退款 / 补号。' },
-      { text: '仅提供首次登陆咨询与基础使用指导。' },
-      ...common
-    ]
+    return ['无质保：不支持退款 / 补号。', '仅提供首次登陆咨询与基础使用指导。', ...common]
   }
 
   if (planKey.value === 'warranty') {
-    return [
-      { text: '质保：支持退款 / 补号（按平台规则处理）。' },
-      { text: '遇到封号/异常可联系售后协助处理。' },
-      ...common
-    ]
+    return ['质保：支持退款 / 补号（按平台规则处理）。', '遇到封号/异常可联系售后协助处理。', ...common]
   }
 
   if (planKey.value === 'anti_ban') {
-    return [
-      { text: '经过特殊处理：开通后无法退出工作空间。', highlight: true },
-      { text: '质保：支持退款 / 补号（按平台规则处理）。' },
-      ...common
-    ]
+    return ['经过特殊处理：开通后无法退出工作空间。', '质保：支持退款 / 补号（按平台规则处理）。', ...common]
   }
 
   return common

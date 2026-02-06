@@ -29,6 +29,7 @@ import {
 } from '../services/xianyu-orders.js'
 import { withLocks } from '../utils/locks.js'
 import { requireFeatureEnabled } from '../middleware/feature-flags.js'
+import { SPACE_MEMBER_LIMIT, calcRedeemableSlots } from '../utils/space-capacity.js'
 
 const router = express.Router()
 const CHANNEL_LABELS = {
@@ -196,7 +197,7 @@ export async function redeemCodeInternal({
   channel = 'common',
   orderType,
   redeemerUid,
-  capacityLimit = 6,
+  capacityLimit = SPACE_MEMBER_LIMIT,
   skipCodeFormatValidation = false,
   allowCommonChannelFallback = false,
 }) {
@@ -354,7 +355,7 @@ export async function redeemCodeInternal({
 
   let accountResult
 
-  const maxSeats = Math.max(1, Number(capacityLimit) || 6)
+  const maxSeats = Math.max(1, Math.min(SPACE_MEMBER_LIMIT, Number(capacityLimit) || SPACE_MEMBER_LIMIT))
 
   if (boundAccountEmail) {
     accountResult = db.exec(`
@@ -748,10 +749,10 @@ router.post('/batch', authenticateToken, requireMenu('redemption_codes'), async 
     const accountRow = accountResult[0].values[0]
     const currentUserCount = accountRow[2] || 0
 
-    // 如果账号已满员（5人），不能创建兑换码
-    if (currentUserCount >= 5) {
+    // 如果账号已满员，不能创建兑换码
+    if (currentUserCount >= SPACE_MEMBER_LIMIT) {
       return res.status(400).json({
-        error: '该账号已满员（5人），无法创建兑换码',
+        error: `该账号已满员（${SPACE_MEMBER_LIMIT}人），无法创建兑换码`,
         currentUserCount: currentUserCount
       })
     }
@@ -766,8 +767,7 @@ router.post('/batch', authenticateToken, requireMenu('redemption_codes'), async 
 
     // 计算实际可以生成的数量
     // 可创建数量 = 总容量(5) - 当前人数 - 未使用的兑换码数
-    const totalCapacity = 5
-    const availableSlots = totalCapacity - currentUserCount - unusedCodesCount
+    const availableSlots = calcRedeemableSlots(currentUserCount, SPACE_MEMBER_LIMIT) - unusedCodesCount
 
     if (availableSlots <= 0) {
       return res.status(400).json({
@@ -1296,7 +1296,7 @@ router.post('/recover', async (req, res) => {
           JOIN gpt_accounts ga ON lower(ga.email) = lower(rc.account_email)
           WHERE rc.is_redeemed = 0
             AND rc.account_email IS NOT NULL
-            AND COALESCE(ga.user_count, 0) + COALESCE(ga.invite_count, 0) < 6
+            AND COALESCE(ga.user_count, 0) + COALESCE(ga.invite_count, 0) < 5
             AND COALESCE(ga.is_banned, 0) = 0
             AND (rc.reserved_for_entry_id IS NULL OR rc.reserved_for_entry_id = 0)
             AND (rc.reserved_for_order_no IS NULL OR rc.reserved_for_order_no = '')
