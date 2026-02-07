@@ -29,6 +29,12 @@ const maxRetries = () => Math.max(0, toInt(process.env.CREDIT_ORDER_ACTION_MAX_R
 const baseDelaySeconds = () => Math.max(5, toInt(process.env.CREDIT_ORDER_ACTION_RETRY_BASE_SECONDS, 60))
 const maxDelaySeconds = () => Math.max(30, toInt(process.env.CREDIT_ORDER_ACTION_RETRY_MAX_SECONDS, 3600))
 const concurrency = () => Math.max(1, toInt(process.env.CREDIT_ORDER_ACTION_SWEEPER_CONCURRENCY, 2))
+const healthCheckAlertEnabled = () => {
+  const raw = String(process.env.CREDIT_ORDER_ACTION_SWEEPER_HEALTHCHECK_ALERT ?? '').trim().toLowerCase()
+  return raw !== '' && raw !== '0' && raw !== 'false' && raw !== 'off'
+}
+
+let healthCheckAlertSent = false
 
 const safeJsonParse = (raw) => {
   if (!raw) return null
@@ -441,6 +447,15 @@ export const startCreditOrderActionSweeper = () => {
     if (running) return
     running = true
     try {
+      if (healthCheckAlertEnabled() && !healthCheckAlertSent) {
+        healthCheckAlertSent = true
+        await sendAdminAlertEmail({
+          subject: 'Credit 订单执行链路健康检查',
+          text: `healthcheck=credit-order-action-sweeper\nsentAt=${nowIso()}`
+        })
+        console.info(`${LABEL} healthcheck alert sent`)
+      }
+
       const features = await getFeatureFlags()
       if (!isFeatureEnabled(features, 'openAccounts')) return
 
