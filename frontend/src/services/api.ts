@@ -849,15 +849,6 @@ export interface AdminFeatureFlagsResponse {
   }
 }
 
-export interface AdminOpenAccountsSweeperStatusResponse {
-  enabled: boolean
-  envValue: string
-  featureEnabled: boolean
-  lastRunAt: string | null
-  lastSkipReason: string | null
-  lastSkipAt: string | null
-}
-
 export interface AdminPointsWithdrawSettingsResponse {
   rate: {
     points: number
@@ -1051,11 +1042,6 @@ export const adminService = {
     }
   }): Promise<AdminFeatureFlagsResponse> {
     const response = await api.put('/admin/feature-flags', payload)
-    return response.data
-  },
-
-  async getOpenAccountsSweeperStatus(): Promise<AdminOpenAccountsSweeperStatusResponse> {
-    const response = await api.get('/admin/open-accounts-sweeper-status')
     return response.data
   },
 
