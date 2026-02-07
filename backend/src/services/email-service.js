@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer'
+import { randomUUID } from 'node:crypto'
 import { getSmtpSettings } from '../utils/smtp-settings.js'
 
 const parseRecipients = (value) => {
@@ -20,16 +21,34 @@ const buildSmtpConfig = (settings) => {
     return null
   }
 
+  const normalizedPort = Number.isFinite(port) && port > 0 ? port : 465
+  let normalizedSecure = secure
+  if (normalizedPort === 465 && !normalizedSecure) {
+    normalizedSecure = true
+    console.warn('[Email] smtp secure=false with port=465 detected, fallback to implicit TLS')
+  }
+
   return {
     host,
-    port: Number.isFinite(port) && port > 0 ? port : 465,
-    secure,
+    port: normalizedPort,
+    secure: normalizedSecure,
     auth: {
       user,
       pass
     }
   }
 }
+
+const buildLogContext = ({ smtpConfig, to, subject, traceId }) => ({
+  traceId,
+  smtp: {
+    host: smtpConfig?.host,
+    port: smtpConfig?.port,
+    secure: smtpConfig?.secure
+  },
+  to,
+  subject
+})
 
 export async function sendAdminAlertEmail({ subject, text, html } = {}) {
   const settings = await getSmtpSettings()
@@ -51,19 +70,28 @@ export async function sendAdminAlertEmail({ subject, text, html } = {}) {
   const resolvedHtml = typeof html === 'string' ? html : ''
 
   const transporter = nodemailer.createTransport(smtpConfig)
+  const traceId = randomUUID()
 
   try {
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
       from,
       to: recipients.join(','),
       subject: resolvedSubject,
       text: resolvedText || undefined,
       html: resolvedHtml || undefined
     })
-    console.log('[AdminAlert] 告警邮件已发送', { subject: resolvedSubject })
+    console.log('[AdminAlert] 告警邮件已发送', {
+      ...buildLogContext({ smtpConfig, to: recipients, subject: resolvedSubject, traceId }),
+      messageId: info?.messageId
+    })
     return true
   } catch (error) {
-    console.warn('[AdminAlert] 发送告警邮件失败', error?.message || error)
+    console.warn('[AdminAlert] 发送告警邮件失败', {
+      ...buildLogContext({ smtpConfig, to: recipients, subject: resolvedSubject, traceId }),
+      messageId: error?.messageId,
+      error: error?.message || String(error),
+      stack: error?.stack
+    })
     return false
   }
 }
@@ -206,20 +234,34 @@ export async function sendOpenAccountsSweeperReportEmail(summary) {
 
   const transporter = nodemailer.createTransport(smtpConfig)
   const { html, text } = buildOpenAccountsSweeperBody(summary)
+  const traceId = randomUUID()
 
   const subject = process.env.OPEN_ACCOUNTS_SWEEPER_REPORT_SUBJECT || '开放账号超员扫描报告'
   const from = String(settings?.smtp?.from || '').trim() || smtpConfig.auth.user
 
-  await transporter.sendMail({
-    from,
-    to: recipients.join(','),
-    subject,
-    text,
-    html
-  })
+  try {
+    const info = await transporter.sendMail({
+      from,
+      to: recipients.join(','),
+      subject,
+      text,
+      html
+    })
 
-  console.log('[OpenAccountsSweeper] 扫描报告邮件已发送')
-  return true
+    console.log('[OpenAccountsSweeper] 扫描报告邮件已发送', {
+      ...buildLogContext({ smtpConfig, to: recipients, subject, traceId }),
+      messageId: info?.messageId
+    })
+    return true
+  } catch (error) {
+    console.warn('[OpenAccountsSweeper] 发送扫描报告邮件失败', {
+      ...buildLogContext({ smtpConfig, to: recipients, subject, traceId }),
+      messageId: error?.messageId,
+      error: error?.message || String(error),
+      stack: error?.stack
+    })
+    throw error
+  }
 }
 
 export async function sendPurchaseOrderEmail(order) {
@@ -239,6 +281,7 @@ export async function sendPurchaseOrderEmail(order) {
   const transporter = nodemailer.createTransport(smtpConfig)
   const from = String(settings?.smtp?.from || '').trim() || smtpConfig.auth.user
   const subject = process.env.PURCHASE_EMAIL_SUBJECT || '订单信息'
+  const traceId = randomUUID()
 
   const orderNo = String(order?.orderNo || '')
   const serviceDays = Number(order?.serviceDays || 30)
@@ -259,17 +302,27 @@ export async function sendPurchaseOrderEmail(order) {
   `
 
   try {
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
       from,
       to,
       subject,
       text,
       html,
     })
-    console.log('[Purchase] order email sent', { orderNo })
+    console.log('[Purchase] order email sent', {
+      ...buildLogContext({ smtpConfig, to, subject, traceId }),
+      orderNo,
+      messageId: info?.messageId
+    })
     return true
   } catch (error) {
-    console.warn('[Purchase] send order email failed', error?.message || error)
+    console.warn('[Purchase] send order email failed', {
+      ...buildLogContext({ smtpConfig, to, subject, traceId }),
+      orderNo,
+      messageId: error?.messageId,
+      error: error?.message || String(error),
+      stack: error?.stack
+    })
     return false
   }
 }
@@ -298,6 +351,7 @@ export async function sendVerificationCodeEmail(email, code, options = {}) {
   const subject = options?.subject || process.env.EMAIL_VERIFICATION_SUBJECT || '邮箱验证码'
   const from = String(settings?.smtp?.from || '').trim() || smtpConfig.auth.user
   const transporter = nodemailer.createTransport(smtpConfig)
+  const traceId = randomUUID()
 
   const text = `您的验证码为：${resolvedCode}\n有效期：${minutes} 分钟\n如非本人操作请忽略本邮件。`
   const html = `
@@ -311,17 +365,25 @@ export async function sendVerificationCodeEmail(email, code, options = {}) {
   `
 
   try {
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
       from,
       to,
       subject,
       text,
       html,
     })
-    console.log('[VerifyCode] 验证码邮件已发送', { to })
+    console.log('[VerifyCode] 验证码邮件已发送', {
+      ...buildLogContext({ smtpConfig, to, subject, traceId }),
+      messageId: info?.messageId
+    })
     return true
   } catch (error) {
-    console.warn('[VerifyCode] 发送验证码邮件失败', error?.message || error)
+    console.warn('[VerifyCode] 发送验证码邮件失败', {
+      ...buildLogContext({ smtpConfig, to, subject, traceId }),
+      messageId: error?.messageId,
+      error: error?.message || String(error),
+      stack: error?.stack
+    })
     return false
   }
 }
