@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { authService, userService, adminService, versionService } from '@/services/api'
-import type { VersionInfo, LatestVersionInfo } from '@/services/api'
+import type { VersionInfo, LatestVersionInfo, AdminOpenAccountsSweeperStatusResponse } from '@/services/api'
 import { useAppConfigStore } from '@/stores/appConfig'
 import {
   Card,
@@ -92,6 +92,10 @@ const featureFlags = ref({
 const featureFlagsError = ref('')
 const featureFlagsSuccess = ref('')
 const featureFlagsLoading = ref(false)
+
+const openAccountsSweeperStatus = ref<AdminOpenAccountsSweeperStatusResponse | null>(null)
+const openAccountsSweeperStatusError = ref('')
+const openAccountsSweeperStatusLoading = ref(false)
 
 // 邮箱后缀白名单
 const emailDomainWhitelist = ref('')
@@ -190,6 +194,7 @@ onMounted(async () => {
   await loadApiKey()
   await Promise.all([
     loadFeatureFlags(),
+    loadOpenAccountsSweeperStatus(),
     loadEmailDomainWhitelist(),
     loadPointsWithdrawSettings(),
     loadSmtpSettings(),
@@ -252,6 +257,38 @@ const saveFeatureFlags = async () => {
     featureFlagsLoading.value = false
   }
 }
+
+const loadOpenAccountsSweeperStatus = async () => {
+  openAccountsSweeperStatusError.value = ''
+  openAccountsSweeperStatusLoading.value = true
+  try {
+    openAccountsSweeperStatus.value = await adminService.getOpenAccountsSweeperStatus()
+  } catch (err: any) {
+    openAccountsSweeperStatusError.value = err.response?.data?.error || '加载开放账号清理状态失败'
+  } finally {
+    openAccountsSweeperStatusLoading.value = false
+  }
+}
+
+const formatTimestamp = (value?: string | null) => {
+  if (!value) return '暂无'
+  const parsed = Date.parse(value)
+  if (!Number.isFinite(parsed)) return String(value)
+  return new Date(parsed).toLocaleString()
+}
+
+const formatSkipReason = (reason?: string | null) => {
+  if (!reason) return '暂无'
+  if (reason === 'feature_open_accounts_disabled') return '功能开关已关闭'
+  return String(reason)
+}
+
+const openAccountsSweeperEnabledLabel = computed(() => {
+  if (!openAccountsSweeperStatus.value) return '未知'
+  if (!openAccountsSweeperStatus.value.enabled) return '未启用（环境变量）'
+  if (!openAccountsSweeperStatus.value.featureEnabled) return '未启用（功能开关）'
+  return '已启用'
+})
 
 const handleUpdateApiKey = async () => {
   apiKeyError.value = ''
@@ -1091,6 +1128,44 @@ const savePointsWithdrawSettings = async () => {
                 v-model="featureFlags.openAccounts"
                 class="w-6 h-6 rounded-md border-gray-300 text-blue-600 focus:ring-blue-500"
               />
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-gray-100 bg-gray-50 p-4 space-y-3">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <p class="font-medium text-gray-900">开放账号清理状态</p>
+                <p class="text-xs text-gray-500">显示上次运行/跳过信息与启用状态。</p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                class="h-9 px-3 rounded-xl border-gray-200"
+                :disabled="openAccountsSweeperStatusLoading"
+                @click="loadOpenAccountsSweeperStatus"
+              >
+                {{ openAccountsSweeperStatusLoading ? '刷新中...' : '刷新' }}
+              </Button>
+            </div>
+
+            <div class="grid gap-2 text-sm text-gray-600">
+              <div class="flex items-center justify-between gap-4">
+                <span>是否启用</span>
+                <span class="font-medium text-gray-900">{{ openAccountsSweeperEnabledLabel }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span>上次运行时间</span>
+                <span class="font-medium text-gray-900">{{ formatTimestamp(openAccountsSweeperStatus?.lastRunAt) }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span>上次跳过原因</span>
+                <span class="font-medium text-gray-900">{{ formatSkipReason(openAccountsSweeperStatus?.lastSkipReason) }}</span>
+              </div>
+            </div>
+
+            <div v-if="openAccountsSweeperStatusError" class="rounded-xl bg-red-50 p-3 text-red-600 border border-red-100 text-sm font-medium">
+              {{ openAccountsSweeperStatusError }}
             </div>
           </div>
 
