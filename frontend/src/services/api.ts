@@ -872,6 +872,18 @@ export interface AdminSmtpSettingsResponse {
   adminAlertEmail: string
 }
 
+export interface AdminSmtpTestResponse {
+  ok: boolean
+  messageId?: string
+  traceId?: string
+  to?: string
+  subject?: string
+  durationMs?: number
+  error?: string
+  code?: string
+  suggestion?: string
+}
+
 export interface AdminLinuxDoOAuthSettingsResponse {
   oauth: {
     clientId: string
@@ -1068,6 +1080,11 @@ export const adminService = {
 
   async updateSmtpSettings(payload: { smtp: { host: string; port: number; secure: boolean; user: string; pass?: string; from?: string }; adminAlertEmail: string }): Promise<AdminSmtpSettingsResponse> {
     const response = await api.put('/admin/smtp-settings', payload)
+    return response.data
+  },
+
+  async testSmtpSettings(): Promise<AdminSmtpTestResponse> {
+    const response = await api.post('/admin/smtp-test')
     return response.data
   },
 

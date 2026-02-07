@@ -25,12 +25,12 @@ nodemailer.createTransport = (config) => ({
 
 const { sendAdminAlertEmail } = await import('../src/services/email-service.js')
 
-const sent = await sendAdminAlertEmail({
+const result = await sendAdminAlertEmail({
   subject: '测试告警',
   text: '告警内容'
 })
 
-assert.equal(sent, true)
+assert.equal(result.ok, true)
 assert.equal(sendMailCalls.length, 1)
 assert.equal(sendMailCalls[0].config.secure, true)
 assert.equal(sendMailCalls[0].message.to, 'admin@example.com')

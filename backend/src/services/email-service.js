@@ -55,13 +55,13 @@ export async function sendAdminAlertEmail({ subject, text, html } = {}) {
   const smtpConfig = buildSmtpConfig(settings)
   if (!smtpConfig) {
     console.warn('[AdminAlert] SMTP 配置不完整，跳过发送告警邮件')
-    return false
+    return { ok: false, error: 'SMTP 配置不完整', code: 'SMTP_CONFIG_INCOMPLETE' }
   }
 
   const recipients = parseRecipients(settings?.adminAlertEmail)
   if (recipients.length === 0) {
     console.warn('[AdminAlert] ADMIN_ALERT_EMAIL 未配置，跳过发送告警邮件')
-    return false
+    return { ok: false, error: 'ADMIN_ALERT_EMAIL 未配置', code: 'SMTP_RECIPIENTS_EMPTY' }
   }
 
   const resolvedSubject = String(subject || '').trim() || '系统告警'
@@ -84,7 +84,7 @@ export async function sendAdminAlertEmail({ subject, text, html } = {}) {
       ...buildLogContext({ smtpConfig, to: recipients, subject: resolvedSubject, traceId }),
       messageId: info?.messageId
     })
-    return true
+    return { ok: true, messageId: info?.messageId, traceId }
   } catch (error) {
     console.warn('[AdminAlert] 发送告警邮件失败', {
       ...buildLogContext({ smtpConfig, to: recipients, subject: resolvedSubject, traceId }),
@@ -92,7 +92,127 @@ export async function sendAdminAlertEmail({ subject, text, html } = {}) {
       error: error?.message || String(error),
       stack: error?.stack
     })
-    return false
+    return {
+      ok: false,
+      error: error?.message || String(error),
+      code: error?.code,
+      traceId
+    }
+  }
+}
+
+const resolveSystemName = () => {
+  const raw = String(process.env.APP_NAME || process.env.SYSTEM_NAME || '系统').trim()
+  return raw || '系统'
+}
+
+const resolveRuntimeEnv = () => {
+  const raw = String(process.env.APP_ENV || process.env.NODE_ENV || '').trim().toLowerCase()
+  return raw || 'unknown'
+}
+
+export async function sendSmtpTestEmail({ traceId } = {}) {
+  const resolvedTraceId = traceId || randomUUID()
+  const startedAt = Date.now()
+  const settings = await getSmtpSettings()
+  const smtpSnapshot = settings?.smtp || {}
+  const smtpConfig = buildSmtpConfig(settings)
+  if (!smtpConfig) {
+    const error = new Error('SMTP 配置不完整')
+    error.code = 'SMTP_CONFIG_INCOMPLETE'
+    error.traceId = resolvedTraceId
+    error.durationMs = Date.now() - startedAt
+    console.warn('[SmtpTest] SMTP 配置不完整，跳过测试', {
+      traceId: resolvedTraceId,
+      smtp: {
+        host: smtpSnapshot.host,
+        port: smtpSnapshot.port,
+        secure: smtpSnapshot.secure
+      },
+      durationMs: error.durationMs,
+      error: error.message,
+      code: error.code
+    })
+    throw error
+  }
+
+  const recipients = parseRecipients(settings?.adminAlertEmail)
+  if (recipients.length === 0) {
+    const error = new Error('未配置告警收件人，无法测试')
+    error.code = 'SMTP_RECIPIENTS_EMPTY'
+    error.traceId = resolvedTraceId
+    error.durationMs = Date.now() - startedAt
+    console.warn('[SmtpTest] 告警收件人为空，跳过测试', {
+      traceId: resolvedTraceId,
+      smtp: {
+        host: smtpConfig.host,
+        port: smtpConfig.port,
+        secure: smtpConfig.secure
+      },
+      durationMs: error.durationMs,
+      error: error.message,
+      code: error.code
+    })
+    throw error
+  }
+
+  const resolvedSubject = `[${resolveSystemName()}] SMTP 测试邮件 ${new Date().toISOString()}`
+  const from = String(settings?.smtp?.from || '').trim() || smtpConfig.auth.user
+  const to = recipients[0]
+  const environment = resolveRuntimeEnv()
+  const resolvedText = [
+    'SMTP 测试邮件',
+    `host=${smtpConfig.host}`,
+    `port=${smtpConfig.port}`,
+    `secure=${smtpConfig.secure ? 'true' : 'false'}`,
+    `from=${from}`,
+    `to=${to}`,
+    `env=${environment}`,
+    `traceId=${resolvedTraceId}`
+  ].join('\n')
+
+  const transporter = nodemailer.createTransport(smtpConfig)
+
+  try {
+    const info = await transporter.sendMail({
+      from,
+      to,
+      subject: resolvedSubject,
+      text: resolvedText
+    })
+    console.log('[SmtpTest] 测试邮件已发送', {
+      ...buildLogContext({ smtpConfig, to, subject: resolvedSubject, traceId: resolvedTraceId }),
+      from,
+      durationMs: Date.now() - startedAt,
+      messageId: info?.messageId
+    })
+    return {
+      ok: true,
+      messageId: info?.messageId,
+      traceId: resolvedTraceId,
+      to,
+      from,
+      subject: resolvedSubject,
+      durationMs: Date.now() - startedAt,
+      smtp: {
+        host: smtpConfig.host,
+        port: smtpConfig.port,
+        secure: smtpConfig.secure
+      },
+      environment
+    }
+  } catch (error) {
+    console.warn('[SmtpTest] 测试邮件发送失败', {
+      ...buildLogContext({ smtpConfig, to, subject: resolvedSubject, traceId: resolvedTraceId }),
+      from,
+      durationMs: Date.now() - startedAt,
+      error: error?.message || String(error),
+      code: error?.code,
+      stack: error?.stack
+    })
+    error.traceId = resolvedTraceId
+    error.durationMs = Date.now() - startedAt
+    throw error
   }
 }
 

@@ -122,6 +122,10 @@ const adminAlertEmail = ref('')
 const smtpError = ref('')
 const smtpSuccess = ref('')
 const smtpLoading = ref(false)
+const smtpTestLoading = ref(false)
+const smtpTestSuccess = ref('')
+const smtpTestError = ref('')
+const smtpTestSuggestion = ref('')
 const showSmtpPass = ref(false)
 
 // Linux DO OAuth 配置（仅超级管理员）
@@ -694,6 +698,9 @@ const saveTelegramSettings = async () => {
 const loadSmtpSettings = async () => {
   smtpError.value = ''
   smtpSuccess.value = ''
+  smtpTestSuccess.value = ''
+  smtpTestError.value = ''
+  smtpTestSuggestion.value = ''
   try {
     const response = await adminService.getSmtpSettings()
     smtpHost.value = response.smtp?.host || ''
@@ -713,6 +720,9 @@ const loadSmtpSettings = async () => {
 const saveSmtpSettings = async () => {
   smtpError.value = ''
   smtpSuccess.value = ''
+  smtpTestSuccess.value = ''
+  smtpTestError.value = ''
+  smtpTestSuggestion.value = ''
 
   const host = smtpHost.value.trim()
   const port = Number.parseInt(smtpPort.value.trim(), 10)
@@ -760,6 +770,26 @@ const saveSmtpSettings = async () => {
     smtpError.value = err.response?.data?.error || '保存失败'
   } finally {
     smtpLoading.value = false
+  }
+}
+
+const testSmtpSettings = async () => {
+  smtpTestSuccess.value = ''
+  smtpTestError.value = ''
+  smtpTestSuggestion.value = ''
+
+  smtpTestLoading.value = true
+  try {
+    const response = await adminService.testSmtpSettings()
+    const messageId = response.messageId ? `，messageId=${response.messageId}` : ''
+    const traceInfo = response.traceId ? `（traceId=${response.traceId}）` : ''
+    const toInfo = response.to ? `发送至 ${response.to}` : '发送成功'
+    smtpTestSuccess.value = `${toInfo}${messageId}${traceInfo}`
+  } catch (err: any) {
+    smtpTestError.value = err.response?.data?.error || '测试失败'
+    smtpTestSuggestion.value = err.response?.data?.suggestion || ''
+  } finally {
+    smtpTestLoading.value = false
   }
 }
 
@@ -1233,20 +1263,38 @@ const savePointsWithdrawSettings = async () => {
             {{ smtpSuccess }}
           </div>
 
+          <div v-if="smtpTestError" class="rounded-xl bg-red-50 p-4 text-red-600 border border-red-100 text-sm font-medium space-y-2">
+            <div>{{ smtpTestError }}</div>
+            <div v-if="smtpTestSuggestion" class="text-xs text-red-500">建议：{{ smtpTestSuggestion }}</div>
+          </div>
+
+          <div v-if="smtpTestSuccess" class="rounded-xl bg-green-50 p-4 text-green-600 border border-green-100 text-sm font-medium">
+            {{ smtpTestSuccess }}
+          </div>
+
           <div class="flex flex-col sm:flex-row gap-3">
             <Button
               type="button"
               variant="outline"
               class="w-full sm:w-auto h-11 rounded-xl"
-              :disabled="smtpLoading"
+              :disabled="smtpLoading || smtpTestLoading"
               @click="loadSmtpSettings"
             >
               刷新
             </Button>
             <Button
               type="button"
+              variant="outline"
+              class="w-full sm:w-auto h-11 rounded-xl"
+              :disabled="smtpLoading || smtpTestLoading"
+              @click="testSmtpSettings"
+            >
+              {{ smtpTestLoading ? '测试中...' : '测试 SMTP' }}
+            </Button>
+            <Button
+              type="button"
               class="w-full sm:flex-1 h-11 rounded-xl bg-black hover:bg-gray-800 text-white shadow-lg shadow-black/5"
-              :disabled="smtpLoading"
+              :disabled="smtpLoading || smtpTestLoading"
               @click="saveSmtpSettings"
             >
               {{ smtpLoading ? '保存中...' : '保存 SMTP 配置' }}

@@ -246,10 +246,13 @@ const fulfillOpenAccountsBoardOrder = async (db, row) => {
     const payload = { ...existingPayload, attempts, stopRetry: true, lastAttemptAt: nowIso(), lastError: message }
     markFailed(db, orderNo, { message, payload })
     await saveDatabase()
-    await sendAdminAlertEmail({
+    const alertResult = await sendAdminAlertEmail({
       subject: 'Credit 订单执行失败：缺少邮箱',
       text: `${message}\norderNo=${orderNo}\nuid=${uid}\nusername=${username || ''}\naccountId=${targetAccountId}\npaidAt=${paidAt || ''}`,
     })
+    if (!alertResult.ok) {
+      console.warn(`${LABEL} admin alert skipped`, { orderNo, uid, targetAccountId, reason: alertResult.error || 'unknown' })
+    }
     return { ok: false, error: message, retryable: false }
   }
 
@@ -258,10 +261,13 @@ const fulfillOpenAccountsBoardOrder = async (db, row) => {
     const payload = { ...existingPayload, attempts, stopRetry: true, lastAttemptAt: nowIso(), lastError: message }
     markFailed(db, orderNo, { message, payload })
     await saveDatabase()
-    await sendAdminAlertEmail({
+    const alertResult = await sendAdminAlertEmail({
       subject: 'Credit 订单执行失败：开放账号不可用',
       text: `${message}\norderNo=${orderNo}\nuid=${uid}\nusername=${username || ''}\nemail=${email}\naccountId=${targetAccountId}\npaidAt=${paidAt || ''}`,
     })
+    if (!alertResult.ok) {
+      console.warn(`${LABEL} admin alert skipped`, { orderNo, uid, targetAccountId, reason: alertResult.error || 'unknown' })
+    }
     return { ok: false, error: message, retryable: false }
   }
 
@@ -276,10 +282,13 @@ const fulfillOpenAccountsBoardOrder = async (db, row) => {
     const payload = { ...existingPayload, attempts, stopRetry: true, lastAttemptAt: nowIso(), lastError: message }
     markFailed(db, orderNo, { message, payload })
     await saveDatabase()
-    await sendAdminAlertEmail({
+    const alertResult = await sendAdminAlertEmail({
       subject: 'Credit 订单执行失败：开放账号缺少邮箱',
       text: `${message}\norderNo=${orderNo}\nuid=${uid}\nusername=${username || ''}\nemail=${email}\naccountId=${targetAccountId}\npaidAt=${paidAt || ''}`,
     })
+    if (!alertResult.ok) {
+      console.warn(`${LABEL} admin alert skipped`, { orderNo, uid, targetAccountId, reason: alertResult.error || 'unknown' })
+    }
     return { ok: false, error: message, retryable: false }
   }
 
@@ -381,7 +390,7 @@ const fulfillOpenAccountsBoardOrder = async (db, row) => {
     await saveDatabase()
 
     if (shouldAlert) {
-      await sendAdminAlertEmail({
+      const alertResult = await sendAdminAlertEmail({
         subject: 'Credit 订单执行失败：开放账号邀请未完成',
         text: [
           'Credit 订单已支付，但开放账号邀请执行失败。',
@@ -396,6 +405,9 @@ const fulfillOpenAccountsBoardOrder = async (db, row) => {
           `error=${message}`
         ].join('\n')
       })
+      if (!alertResult.ok) {
+        console.warn(`${LABEL} admin alert skipped`, { orderNo, uid, targetAccountId, reason: alertResult.error || 'unknown' })
+      }
     }
 
     console.error(LABEL, 'action failed', { orderNo, uid, targetAccountId, attempt: nextAttempt, retryable, message })
@@ -449,11 +461,15 @@ export const startCreditOrderActionSweeper = () => {
     try {
       if (healthCheckAlertEnabled() && !healthCheckAlertSent) {
         healthCheckAlertSent = true
-        await sendAdminAlertEmail({
+        const alertResult = await sendAdminAlertEmail({
           subject: 'Credit 订单执行链路健康检查',
           text: `healthcheck=credit-order-action-sweeper\nsentAt=${nowIso()}`
         })
-        console.info(`${LABEL} healthcheck alert sent`)
+        if (alertResult.ok) {
+          console.info(`${LABEL} healthcheck alert sent`, { traceId: alertResult.traceId })
+        } else {
+          console.warn(`${LABEL} healthcheck alert skipped`, { reason: alertResult.error || 'unknown' })
+        }
       }
 
       const features = await getFeatureFlags()

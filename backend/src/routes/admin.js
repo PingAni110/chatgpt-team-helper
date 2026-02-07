@@ -8,6 +8,7 @@ import { getPointsWithdrawSettings } from '../utils/points-withdraw-settings.js'
 import { listUserPointsLedger, safeInsertPointsLedgerEntry } from '../utils/points-ledger.js'
 import { upsertSystemConfigValue } from '../utils/system-config.js'
 import { getSmtpSettings, getSmtpSettingsFromEnv, invalidateSmtpSettingsCache, parseBool } from '../utils/smtp-settings.js'
+import { sendSmtpTestEmail } from '../services/email-service.js'
 import {
   getLinuxDoOAuthSettings,
   getLinuxDoOAuthSettingsFromEnv,
@@ -61,6 +62,38 @@ const normalizeAdminMenuPath = (value) => {
 const toInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10)
   return Number.isFinite(parsed) ? parsed : fallback
+}
+
+const suggestSmtpTestFix = (error) => {
+  const code = String(error?.code || '').toUpperCase()
+  const message = String(error?.message || '').toLowerCase()
+  if (code === 'SMTP_CONFIG_INCOMPLETE') return '请补全 SMTP_HOST/SMTP_USER/SMTP_PASS 等配置后再测试'
+  if (code === 'SMTP_RECIPIENTS_EMPTY') return '请先在 ADMIN_ALERT_EMAIL 中配置收件人'
+  if (code === 'EAUTH') return '认证失败，请检查用户名、密码/授权码是否正确'
+  if (code === 'ETIMEDOUT') return '连接超时，请检查 SMTP 主机、端口或网络防火墙'
+  if (code === 'ECONNECTION' || code === 'ECONNREFUSED') return '无法连接，请检查 SMTP 主机、端口是否可达'
+  if (code === 'ESOCKET' && (message.includes('ssl') || message.includes('tls'))) {
+    return 'TLS/SSL 握手失败，请检查端口与安全连接设置是否匹配'
+  }
+  if (message.includes('ssl') || message.includes('tls')) {
+    return 'TLS/SSL 握手失败，请检查端口与安全连接设置是否匹配'
+  }
+  return ''
+}
+
+const mapSmtpTestError = (error) => {
+  const code = String(error?.code || 'SMTP_TEST_FAILED')
+  const message = String(error?.message || 'SMTP 测试失败')
+  const suggestion = suggestSmtpTestFix(error)
+  const status = ['SMTP_CONFIG_INCOMPLETE', 'SMTP_RECIPIENTS_EMPTY', 'EAUTH'].includes(code) ? 400 : 500
+  return {
+    status,
+    error: message,
+    code,
+    suggestion,
+    traceId: error?.traceId,
+    durationMs: error?.durationMs
+  }
 }
 
 const ORDER_TYPE_WARRANTY = 'warranty'
@@ -426,6 +459,23 @@ router.put('/smtp-settings', async (req, res) => {
   } catch (error) {
     console.error('Update smtp-settings error:', error)
     res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+router.post('/smtp-test', async (req, res) => {
+  try {
+    const result = await sendSmtpTestEmail()
+    res.json({
+      ok: true,
+      messageId: result.messageId,
+      traceId: result.traceId,
+      to: result.to,
+      subject: result.subject,
+      durationMs: result.durationMs
+    })
+  } catch (error) {
+    const mapped = mapSmtpTestError(error)
+    res.status(mapped.status).json(mapped)
   }
 })
 
