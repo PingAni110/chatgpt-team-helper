@@ -6,7 +6,7 @@ import { buildMenuTree, listMenus } from '../services/rbac.js'
 import { parseDomainWhitelist, getEmailDomainWhitelistFromEnv } from '../utils/email-domain-whitelist.js'
 import { getPointsWithdrawSettings } from '../utils/points-withdraw-settings.js'
 import { listUserPointsLedger, safeInsertPointsLedgerEntry } from '../utils/points-ledger.js'
-import { getSystemConfigValue, upsertSystemConfigValue } from '../utils/system-config.js'
+import { upsertSystemConfigValue } from '../utils/system-config.js'
 import { getSmtpSettings, getSmtpSettingsFromEnv, invalidateSmtpSettingsCache, parseBool } from '../utils/smtp-settings.js'
 import {
   getLinuxDoOAuthSettings,
@@ -18,7 +18,7 @@ import {
 import { getZpaySettings, getZpaySettingsFromEnv, invalidateZpaySettingsCache } from '../utils/zpay-settings.js'
 import { getTurnstileSettings, getTurnstileSettingsFromEnv, invalidateTurnstileSettingsCache } from '../utils/turnstile-settings.js'
 import { getTelegramSettings, getTelegramSettingsFromEnv, invalidateTelegramSettingsCache } from '../utils/telegram-settings.js'
-import { getFeatureFlags, invalidateFeatureFlagsCache, isFeatureEnabled } from '../utils/feature-flags.js'
+import { getFeatureFlags, invalidateFeatureFlagsCache } from '../utils/feature-flags.js'
 import { withLocks } from '../utils/locks.js'
 import { redeemCodeInternal } from './redemption-codes.js'
 
@@ -74,15 +74,6 @@ const normalizeOrderType = (value) => {
 }
 
 const ACCOUNT_RECOVERY_WINDOW_DAYS = Math.max(1, toInt(process.env.ACCOUNT_RECOVERY_WINDOW_DAYS, 30))
-
-const OPEN_ACCOUNTS_SWEEPER_LAST_RUN_AT_KEY = 'open_accounts_sweeper_last_run_at'
-const OPEN_ACCOUNTS_SWEEPER_LAST_SKIP_REASON_KEY = 'open_accounts_sweeper_last_skip_reason'
-const OPEN_ACCOUNTS_SWEEPER_LAST_SKIP_AT_KEY = 'open_accounts_sweeper_last_skip_at'
-
-const isOpenAccountsSweeperEnabled = () => {
-  const raw = String(process.env.OPEN_ACCOUNTS_SWEEPER_ENABLED ?? 'true').trim().toLowerCase()
-  return raw !== '0' && raw !== 'false' && raw !== 'off'
-}
 
 const recordAccountRecovery = (db, payload) => {
   if (!db || !payload) return
@@ -329,32 +320,6 @@ router.put('/feature-flags', async (req, res) => {
     res.json({ features })
   } catch (error) {
     console.error('Update feature-flags error:', error)
-    res.status(500).json({ error: 'Internal server error' })
-  }
-})
-
-router.get('/open-accounts-sweeper-status', async (req, res) => {
-  try {
-    const db = await getDatabase()
-    const normalizeValue = (value) => {
-      const text = String(value ?? '').trim()
-      return text ? text : null
-    }
-    const features = await getFeatureFlags(db)
-    const lastRunAt = normalizeValue(getSystemConfigValue(db, OPEN_ACCOUNTS_SWEEPER_LAST_RUN_AT_KEY))
-    const lastSkipReason = normalizeValue(getSystemConfigValue(db, OPEN_ACCOUNTS_SWEEPER_LAST_SKIP_REASON_KEY))
-    const lastSkipAt = normalizeValue(getSystemConfigValue(db, OPEN_ACCOUNTS_SWEEPER_LAST_SKIP_AT_KEY))
-
-    res.json({
-      enabled: isOpenAccountsSweeperEnabled(),
-      envValue: process.env.OPEN_ACCOUNTS_SWEEPER_ENABLED ?? 'true',
-      featureEnabled: isFeatureEnabled(features, 'openAccounts'),
-      lastRunAt,
-      lastSkipReason,
-      lastSkipAt
-    })
-  } catch (error) {
-    console.error('Get open-accounts-sweeper-status error:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 })
