@@ -26,7 +26,7 @@ const isEnabledFlag = (value, defaultValue = false) => {
   return raw !== '0' && raw !== 'false' && raw !== 'off'
 }
 
-const runOnStartup = () => isEnabledFlag(process.env.OPEN_ACCOUNTS_SWEEPER_RUN_ON_STARTUP, false)
+const runOnStartup = () => isEnabledFlag(process.env.OPEN_ACCOUNTS_SWEEPER_RUN_ON_STARTUP, true)
 
 // 间隔小时数，默认1小时
 const intervalHours = () => Math.max(1, toInt(process.env.OPEN_ACCOUNTS_SWEEPER_INTERVAL_HOURS, DEFAULT_INTERVAL_HOURS))
@@ -178,7 +178,9 @@ const enforceAccountCapacity = async (accountId, { maxJoinedCount, proxy } = {})
 
 export const startOpenAccountsOvercapacitySweeper = () => {
   if (!isEnabled()) {
-    console.log('[OpenAccountsSweeper] disabled')
+    console.log('[OpenAccountsSweeper] disabled', {
+      enabled: String(process.env.OPEN_ACCOUNTS_SWEEPER_ENABLED ?? 'true')
+    })
     return () => {}
   }
 
@@ -189,7 +191,12 @@ export const startOpenAccountsOvercapacitySweeper = () => {
     const startedAt = new Date()
     try {
       const features = await getFeatureFlags()
-      if (!isFeatureEnabled(features, 'openAccounts')) return
+      if (!isFeatureEnabled(features, 'openAccounts')) {
+        console.log('[OpenAccountsSweeper] skipped (feature disabled)', {
+          feature_open_accounts_enabled: features?.openAccounts
+        })
+        return
+      }
 
       const db = await getDatabase()
 	      const windowDays = createdWithinDays()
@@ -199,6 +206,7 @@ export const startOpenAccountsOvercapacitySweeper = () => {
 	            [`-${windowDays} days`]
 	          )
 	        : db.exec('SELECT id, email FROM gpt_accounts WHERE is_open = 1 AND COALESCE(is_banned, 0) = 0')
+      const max = maxJoined()
       const accountRows = (result[0]?.values || [])
         .map(row => {
           const id = Number(row[0])
@@ -207,9 +215,23 @@ export const startOpenAccountsOvercapacitySweeper = () => {
           return Number.isFinite(id) ? { id, emailPrefix } : null
         })
         .filter(Boolean)
-      if (accountRows.length === 0) return
+      if (accountRows.length === 0) {
+        console.log('[OpenAccountsSweeper] no open accounts to scan', {
+          scanCreatedWithinDays: windowDays
+        })
+        await sendOpenAccountsSweeperReportEmail({
+          startedAt,
+          finishedAt: new Date(),
+          maxJoined: max,
+          scanCreatedWithinDays: windowDays,
+          scannedCount: 0,
+          totalKicked: 0,
+          results: [],
+          failures: []
+        })
+        return
+      }
 
-      const max = maxJoined()
       const workerCount = Math.min(concurrency(), accountRows.length)
       const queue = [...accountRows]
       const proxies = loadProxyList()
