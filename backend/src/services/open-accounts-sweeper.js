@@ -5,6 +5,7 @@ import { AccountSyncError, deleteAccountUser, fetchAccountUsersList, syncAccount
 import { sendOpenAccountsSweeperReportEmail } from './email-service.js'
 import { getFeatureFlags, isFeatureEnabled } from '../utils/feature-flags.js'
 import { SPACE_MEMBER_LIMIT } from '../utils/space-capacity.js'
+import { upsertSystemConfigValue } from '../utils/system-config.js'
 
 const DEFAULT_INTERVAL_HOURS = 1
 const DEFAULT_MAX_JOINED = SPACE_MEMBER_LIMIT
@@ -15,7 +16,7 @@ const toInt = (value, fallback) => {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
-const isEnabled = () => {
+export const isOpenAccountsSweeperEnabled = () => {
   const raw = String(process.env.OPEN_ACCOUNTS_SWEEPER_ENABLED ?? 'true').trim().toLowerCase()
   return raw !== '0' && raw !== 'false' && raw !== 'off'
 }
@@ -37,6 +38,25 @@ const createdWithinDays = () => Math.max(0, toInt(process.env.OPEN_ACCOUNTS_SWEE
 const parseTime = (value) => {
   const time = Date.parse(String(value || ''))
   return Number.isFinite(time) ? time : 0
+}
+
+const SWEEPER_LAST_RUN_AT_KEY = 'open_accounts_sweeper_last_run_at'
+const SWEEPER_LAST_SKIP_REASON_KEY = 'open_accounts_sweeper_last_skip_reason'
+const SWEEPER_LAST_SKIP_AT_KEY = 'open_accounts_sweeper_last_skip_at'
+
+const recordSweeperRun = async (timestamp) => {
+  const db = await getDatabase()
+  const value = timestamp instanceof Date ? timestamp.toISOString() : new Date().toISOString()
+  upsertSystemConfigValue(db, SWEEPER_LAST_RUN_AT_KEY, value)
+  saveDatabase()
+}
+
+const recordSweeperSkip = async (reason, timestamp) => {
+  const db = await getDatabase()
+  const value = timestamp instanceof Date ? timestamp.toISOString() : new Date().toISOString()
+  upsertSystemConfigValue(db, SWEEPER_LAST_SKIP_REASON_KEY, reason)
+  upsertSystemConfigValue(db, SWEEPER_LAST_SKIP_AT_KEY, value)
+  saveDatabase()
 }
 
 const fetchAllStandardUsers = async (accountId, { proxy } = {}) => {
@@ -177,8 +197,10 @@ const enforceAccountCapacity = async (accountId, { maxJoinedCount, proxy } = {})
 }
 
 export const startOpenAccountsOvercapacitySweeper = () => {
-  if (!isEnabled()) {
-    console.log('[OpenAccountsSweeper] disabled')
+  if (!isOpenAccountsSweeperEnabled()) {
+    console.log('[OpenAccountsSweeper] disabled', {
+      OPEN_ACCOUNTS_SWEEPER_ENABLED: process.env.OPEN_ACCOUNTS_SWEEPER_ENABLED ?? 'true'
+    })
     return () => {}
   }
 
@@ -189,7 +211,13 @@ export const startOpenAccountsOvercapacitySweeper = () => {
     const startedAt = new Date()
     try {
       const features = await getFeatureFlags()
-      if (!isFeatureEnabled(features, 'openAccounts')) return
+      if (!isFeatureEnabled(features, 'openAccounts')) {
+        console.log('[OpenAccountsSweeper] skipped: feature disabled', { feature: 'openAccounts' })
+        await recordSweeperSkip('feature_open_accounts_disabled', startedAt)
+        return
+      }
+
+      await recordSweeperRun(startedAt)
 
       const db = await getDatabase()
 	      const windowDays = createdWithinDays()
