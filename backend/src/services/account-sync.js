@@ -340,9 +340,15 @@ export async function fetchOpenAiAccountInfo(token, proxy = null) {
   return accountIds
     .map(id => {
       const acc = accountsMap[id]
+      const rawEmail = acc?.account?.owner_email
+        || acc?.account?.ownerEmail
+        || acc?.account?.email
+        || acc?.account?.owner?.email
+      const email = typeof rawEmail === 'string' ? rawEmail.trim() : ''
       return {
         accountId: id,
         name: acc?.account?.name || 'Unnamed Team',
+        email: email || null,
         planType: acc?.account?.plan_type || null,
         expiresAt: acc?.entitlement?.expires_at || null,
         hasActiveSubscription: !!acc?.entitlement?.has_active_subscription,

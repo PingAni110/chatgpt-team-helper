@@ -300,6 +300,7 @@ export interface CreateGptAccountDto {
 export interface ChatgptAccountCheckInfo {
   accountId: string
   name: string
+  email?: string
   planType: string | null
   expiresAt: string | null
   hasActiveSubscription: boolean

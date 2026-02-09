@@ -486,6 +486,13 @@ const applyCheckedAccountSelection = (accountId: string) => {
   }
 }
 
+const resolveCheckedAccountEmail = (accountId: string) => {
+  const normalized = String(accountId || '').trim()
+  if (!normalized) return ''
+  const matched = checkedChatgptAccounts.value.find(acc => acc.accountId === normalized)
+  return String(matched?.email || '').trim()
+}
+
 const openChatgptIdDropdown = async () => {
   await nextTick()
   const el = document.getElementById('chatgpt-account-id-input') as HTMLInputElement | null
@@ -524,7 +531,18 @@ const handleCheckAccessToken = async () => {
       formData.value.chatgptAccountId = checkedChatgptAccounts.value[0]?.accountId || ''
     }
 
-    applyCheckedAccountSelection(formData.value.chatgptAccountId)
+    const selectedAccountId = String(formData.value.chatgptAccountId || '').trim()
+    applyCheckedAccountSelection(selectedAccountId)
+
+    const checkedEmail = resolveCheckedAccountEmail(selectedAccountId)
+    if (checkedEmail) {
+      const currentEmail = String(formData.value.email || '').trim()
+      if (!currentEmail) {
+        formData.value.email = checkedEmail
+      } else if (currentEmail.toLowerCase() !== checkedEmail.toLowerCase()) {
+        showWarningToast(`授权账号邮箱为 ${checkedEmail}，与表单邮箱不一致，请确认是否填错`)
+      }
+    }
     await openChatgptIdDropdown()
   } catch (err: any) {
     const message = err?.response?.data?.error || '校验失败'
