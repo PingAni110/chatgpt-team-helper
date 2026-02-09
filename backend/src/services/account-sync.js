@@ -290,12 +290,36 @@ const parseJsonOrThrow = (text, { logContext, message }) => {
   }
 }
 
+const decodeJwtPayload = (token) => {
+  if (!token) return null
+  const parts = String(token).split('.')
+  if (parts.length < 2) return null
+  const payload = parts[1]
+  const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = normalized.padEnd(normalized.length + (4 - (normalized.length % 4 || 4)), '=')
+  try {
+    const decoded = Buffer.from(padded, 'base64').toString('utf8')
+    return JSON.parse(decoded)
+  } catch {
+    return null
+  }
+}
+
+const resolveFallbackEmail = (payload) => {
+  if (!payload || typeof payload !== 'object') return ''
+  const rawEmail = payload['https://api.openai.com/profile.email']
+    || payload['https://api.openai.com/profile']?.email
+    || payload.profile?.email
+  return typeof rawEmail === 'string' ? rawEmail.trim() : ''
+}
+
 export async function fetchOpenAiAccountInfo(token, proxy = null) {
   const normalizedToken = String(token || '').trim().replace(/^Bearer\s+/i, '')
   if (!normalizedToken) {
     throw new AccountSyncError('缺少 access token', 400)
   }
 
+  const fallbackEmail = resolveFallbackEmail(decodeJwtPayload(normalizedToken))
   const apiUrl = 'https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27'
   const headers = {
     accept: '*/*',
@@ -344,11 +368,11 @@ export async function fetchOpenAiAccountInfo(token, proxy = null) {
         || acc?.account?.ownerEmail
         || acc?.account?.email
         || acc?.account?.owner?.email
-      const email = typeof rawEmail === 'string' ? rawEmail.trim() : ''
+      const email = typeof rawEmail === 'string' ? rawEmail.trim() : fallbackEmail
       return {
         accountId: id,
         name: acc?.account?.name || 'Unnamed Team',
-        email: email || null,
+        email: email ? email.trim() : null,
         planType: acc?.account?.plan_type || null,
         expiresAt: acc?.entitlement?.expires_at || null,
         hasActiveSubscription: !!acc?.entitlement?.has_active_subscription,
