@@ -141,25 +141,49 @@ const markAccountSpaceStatus = async (db, accountId, { code, reason = '' } = {})
 }
 
 const getAccountById = (db, accountId) => {
-  const result = db.exec(
-    `
-      SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
-             COALESCE(is_demoted, 0) AS is_demoted,
-             COALESCE(is_banned, 0) AS is_banned,
-             COALESCE(sort_order, id) AS sort_order,
-             COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
-             COALESCE(space_status_code, 'unknown') AS space_status_code,
-             space_status_reason,
-             created_at, updated_at
-      FROM gpt_accounts
-      WHERE id = ?
-    `,
-    [accountId]
-  )
+  let result
+  let hasStatusColumns = true
+
+  try {
+    result = db.exec(
+      `
+        SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
+               COALESCE(is_demoted, 0) AS is_demoted,
+               COALESCE(is_banned, 0) AS is_banned,
+               COALESCE(sort_order, id) AS sort_order,
+               COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
+               COALESCE(space_status_code, 'unknown') AS space_status_code,
+               space_status_reason,
+               created_at, updated_at
+        FROM gpt_accounts
+        WHERE id = ?
+      `,
+      [accountId]
+    )
+  } catch (error) {
+    hasStatusColumns = false
+    console.warn('[GptAccounts] fallback account query (legacy schema):', error?.message || error)
+    result = db.exec(
+      `
+        SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
+               COALESCE(is_demoted, 0) AS is_demoted,
+               COALESCE(is_banned, 0) AS is_banned,
+               COALESCE(sort_order, id) AS sort_order,
+               COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
+               created_at, updated_at
+        FROM gpt_accounts
+        WHERE id = ?
+      `,
+      [accountId]
+    )
+  }
+
   if (!result[0]?.values?.length) return null
   const row = result[0].values[0]
-  const spaceStatusCode = row[14] || 'unknown'
-  const spaceStatusReason = row[15] || ''
+  const spaceStatusCode = hasStatusColumns ? (row[14] || 'unknown') : 'unknown'
+  const spaceStatusReason = hasStatusColumns ? (row[15] || '') : ''
+  const createdAt = hasStatusColumns ? row[16] : row[14]
+  const updatedAt = hasStatusColumns ? row[17] : row[15]
 
   return {
     id: row[0],
@@ -178,8 +202,8 @@ const getAccountById = (db, accountId) => {
     spaceType: row[13] || SPACE_TYPE_CHILD,
     spaceStatusCode,
     spaceStatusReason,
-    createdAt: row[16],
-    updatedAt: row[17],
+    createdAt,
+    updatedAt,
     spaceStatus: resolveSpaceStatus({
       isBanned: Boolean(row[11]),
       token: row[2],
