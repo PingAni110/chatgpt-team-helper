@@ -224,9 +224,25 @@ function buildOpenAccountsSweeperBody(summary) {
     scanCreatedWithinDays,
     scannedCount,
     totalKicked,
+    abnormalSpaceCount,
     results = [],
     failures = []
   } = summary || {}
+
+  const derivedAbnormalSpaceCount =
+    Number.isFinite(Number(abnormalSpaceCount)) && Number(abnormalSpaceCount) >= 0
+      ? Number(abnormalSpaceCount)
+      : (() => {
+          const abnormalSpaceSet = new Set()
+          for (const item of results || []) {
+            if (!Array.isArray(item?.failedUsers) || item.failedUsers.length === 0) continue
+            abnormalSpaceSet.add(item.accountId || item.emailPrefix || `result-${abnormalSpaceSet.size}`)
+          }
+          for (const item of failures || []) {
+            abnormalSpaceSet.add(item.accountId || item.emailPrefix || `failure-${abnormalSpaceSet.size}`)
+          }
+          return abnormalSpaceSet.size
+        })()
 
   const humanStart = startedAt ? startedAt.toLocaleString() : ''
   const humanEnd = finishedAt ? finishedAt.toLocaleString() : ''
@@ -273,18 +289,21 @@ function buildOpenAccountsSweeperBody(summary) {
 
   const htmlParts = [
     `<p>开放账号超员扫描已完成。</p>`,
-    `<p>扫描账号数：${scannedCount ?? 0}，阈值：joined &gt; ${maxJoined ?? ''}，本次踢出：${totalKicked ?? 0}</p>`,
+    `<p>扫描账号数：${scannedCount ?? 0}，阈值：joined &gt; ${maxJoined ?? ''}，本次踢出：${totalKicked ?? 0}，异常空间数量：${derivedAbnormalSpaceCount}</p>`,
     ...(Number(scanCreatedWithinDays) > 0 ? [`<p>扫描范围：最近 ${scanCreatedWithinDays} 天创建的开放账号</p>`] : []),
-    '<table style="border-collapse:collapse;width:100%;">',
-    '<thead><tr><th style="text-align:left;border-bottom:1px solid #ccc;">邮箱前缀</th><th style="text-align:right;border-bottom:1px solid #ccc;">触发前人数</th><th style="text-align:right;border-bottom:1px solid #ccc;">踢出后人数</th><th style="text-align:center;border-bottom:1px solid #ccc;">是否踢出</th><th style="text-align:right;border-bottom:1px solid #ccc;">踢出人数</th><th style="text-align:left;border-bottom:1px solid #ccc;">踢出明细</th></tr></thead>',
-    `<tbody>${rows || '<tr><td colspan="6">无</td></tr>'}</tbody>`,
-    '</table>'
   ]
 
   if ((failures || []).length > 0) {
     htmlParts.push('<p>以下账号处理失败：</p>')
     htmlParts.push(`<ul>${failureRows}</ul>`)
   }
+
+  htmlParts.push('<table style="border-collapse:collapse;width:100%;">')
+  htmlParts.push(
+    '<thead><tr><th style="text-align:left;border-bottom:1px solid #ccc;">邮箱前缀</th><th style="text-align:right;border-bottom:1px solid #ccc;">触发前人数</th><th style="text-align:right;border-bottom:1px solid #ccc;">踢出后人数</th><th style="text-align:center;border-bottom:1px solid #ccc;">是否踢出</th><th style="text-align:right;border-bottom:1px solid #ccc;">踢出人数</th><th style="text-align:left;border-bottom:1px solid #ccc;">踢出明细</th></tr></thead>'
+  )
+  htmlParts.push(`<tbody>${rows || '<tr><td colspan="6">无</td></tr>'}</tbody>`)
+  htmlParts.push('</table>')
 
   if (humanStart || humanEnd) {
     htmlParts.push('<p>')
@@ -334,7 +353,7 @@ function buildOpenAccountsSweeperBody(summary) {
 
   return {
     html: htmlParts.join('\n'),
-    text: `开放账号超员扫描已完成。\n扫描账号数：${scannedCount ?? 0}，阈值：${maxJoined ?? ''}，本次踢出：${totalKicked ?? 0}${Number(scanCreatedWithinDays) > 0 ? `\n扫描范围：最近 ${scanCreatedWithinDays} 天创建的开放账号` : ''}\n\n${textRows}${textFailures}${textTime}`
+    text: `开放账号超员扫描已完成。\n扫描账号数：${scannedCount ?? 0}，阈值：${maxJoined ?? ''}，本次踢出：${totalKicked ?? 0}，异常空间数量：${derivedAbnormalSpaceCount}${Number(scanCreatedWithinDays) > 0 ? `\n扫描范围：最近 ${scanCreatedWithinDays} 天创建的开放账号` : ''}${textFailures}\n\n${textRows}${textTime}`
   }
 }
 
