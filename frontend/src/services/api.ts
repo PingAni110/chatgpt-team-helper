@@ -279,7 +279,9 @@ export interface GptAccount {
   oaiDeviceId?: string
   expireAt?: string | null
   sortOrder?: number
-  spaceStatus?: { code: 'normal' | 'abnormal'; reason: string }
+  spaceStatus?: { code: 'normal' | 'abnormal' | 'unknown'; reason: string }
+  spaceStatusCode?: 'normal' | 'abnormal' | 'unknown'
+  spaceStatusReason?: string
   createdAt: string
   updatedAt: string
 }
@@ -374,6 +376,12 @@ export interface DeleteInviteResponse {
   result?: any
   account: GptAccount
   inviteCount: number
+}
+
+
+export interface UpdateSpaceStatusResponse {
+  message: string
+  account: GptAccount
 }
 
 export interface RefreshTokenResponse {
@@ -1474,6 +1482,12 @@ export const gptAccountService = {
     const response = await api.delete(`/gpt-accounts/${accountId}/invites`, {
       data: { email_address: emailAddress }
     })
+    return response.data
+  },
+
+
+  async updateSpaceStatus(id: number, payload: { code: 'normal' | 'abnormal' | 'unknown'; reason?: string }): Promise<UpdateSpaceStatusResponse> {
+    const response = await api.patch(`/gpt-accounts/${id}/space-status`, payload)
     return response.data
   },
 
