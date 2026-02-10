@@ -1619,6 +1619,24 @@ export async function initDatabase() {
 	              console.log('已添加 space_type 列到 gpt_accounts 表')
 	              saveDatabase()
 	            }
+
+            if (!columns.includes('sort_order')) {
+              database.run('ALTER TABLE gpt_accounts ADD COLUMN sort_order INTEGER DEFAULT 0')
+              console.log('已添加 sort_order 列到 gpt_accounts 表')
+              saveDatabase()
+            }
+
+            if (!columns.includes('space_status_code')) {
+              database.run("ALTER TABLE gpt_accounts ADD COLUMN space_status_code TEXT DEFAULT 'normal'")
+              console.log('已添加 space_status_code 列到 gpt_accounts 表')
+              saveDatabase()
+            }
+
+            if (!columns.includes('space_status_reason')) {
+              database.run('ALTER TABLE gpt_accounts ADD COLUMN space_status_reason TEXT')
+              console.log('已添加 space_status_reason 列到 gpt_accounts 表')
+              saveDatabase()
+            }
 	          }
 
 	          // 检查 redemption_codes 表的列

@@ -58,19 +58,29 @@ const activeSpaceTab = ref<'normal' | 'abnormal'>('normal')
 const requestGuard = createRequestGuard()
 
 const resolveAccountStatus = (account: GptAccount) => {
-  const status = account.spaceStatus
-  if (status?.code === 'abnormal') return status
-  if (account.isBanned) return { code: 'abnormal', reason: '账号被封' }
-  if (!String(account.token || '').trim()) return { code: 'abnormal', reason: 'Token 失效' }
-  return { code: 'normal', reason: '正常' }
+  const rawStatusCode = String(account.spaceStatus?.code || account.spaceStatusCode || '').trim().toLowerCase()
+  const statusReason = String(account.spaceStatus?.reason || account.spaceStatusReason || '').trim()
+
+  if (rawStatusCode === 'normal') return { code: 'normal' as const, reason: statusReason || '正常' }
+  if (rawStatusCode === 'abnormal') return { code: 'abnormal' as const, reason: statusReason || '空间异常' }
+  if (rawStatusCode === 'unknown') return { code: 'unknown' as const, reason: statusReason || '状态待确认' }
+
+  return { code: 'unknown' as const, reason: statusReason || '状态待确认' }
 }
 
 const displayedAccounts = computed(() => {
   return accounts.value.filter((account) => {
     const status = resolveAccountStatus(account)
-    return activeSpaceTab.value === 'normal' ? status.code === 'normal' : status.code === 'abnormal'
+    return activeSpaceTab.value === 'normal' ? status.code === 'normal' : status.code !== 'normal'
   })
 })
+
+const resolveStatusBadgeClass = (account: GptAccount) => {
+  const status = resolveAccountStatus(account)
+  if (status.code === 'normal') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  if (status.code === 'abnormal') return 'border-red-200 bg-red-50 text-red-700'
+  return 'border-amber-200 bg-amber-50 text-amber-700'
+}
 // Teleport 目标是否存在
 const teleportReady = ref(false)
 
@@ -186,17 +196,27 @@ const isTokenInvalidError = (err: any) => {
   return /token.*(过期|无效|invalid|expired)|unauthorized|invalid token/.test(message)
 }
 
-const markAccountStatusAbnormal = (accountId: number, reason: string) => {
+const markAccountStatusAbnormal = async (accountId: number, reason: string) => {
   const idx = accounts.value.findIndex(item => item.id === accountId)
   if (idx === -1) return
   const current = accounts.value[idx]
   if (!current) return
+
   accounts.value[idx] = {
     ...current,
     spaceStatus: { code: 'abnormal', reason },
+    spaceStatusCode: 'abnormal',
+    spaceStatusReason: reason,
     updatedAt: current.updatedAt
   }
   accounts.value = [...accounts.value]
+
+  try {
+    await gptAccountService.updateSpaceStatus(accountId, { code: 'abnormal', reason })
+    await loadAccounts()
+  } catch (err: any) {
+    showErrorToast(err?.response?.data?.error || '空间状态持久化失败')
+  }
 }
 
 const ensureSystemApiKey = async (): Promise<string | null> => {
@@ -587,9 +607,17 @@ const loadAccounts = async () => {
     const normalizedAccounts = (response.accounts || []).map((item: any) => {
       const source = item && typeof item === 'object' ? item : {}
       const expireAt = source.expireAt ?? source.expire_at ?? source.expireTime ?? source.expire_time ?? source.expiresAt ?? null
+      const rawSpaceStatusCode = String(source.spaceStatusCode ?? source.space_status_code ?? source.spaceStatus?.code ?? '').trim().toLowerCase()
+      const spaceStatusCode = rawSpaceStatusCode === 'normal' || rawSpaceStatusCode === 'abnormal' || rawSpaceStatusCode === 'unknown'
+        ? rawSpaceStatusCode
+        : 'unknown'
+      const spaceStatusReason = String(source.spaceStatusReason ?? source.space_status_reason ?? source.spaceStatus?.reason ?? '').trim()
       return {
         ...source,
         spaceType: source.spaceType || source.space_type || 'child',
+        spaceStatusCode,
+        spaceStatusReason,
+        spaceStatus: { code: spaceStatusCode, reason: spaceStatusReason },
         expireAt: expireAt == null ? null : String(expireAt),
       }
     })
@@ -942,7 +970,7 @@ const handleShowMembers = async (account: GptAccount) => {
   } catch (err: any) {
     syncError.value = err.response?.data?.error || '获取成员信息失败'
     if (isTokenInvalidError(err)) {
-      markAccountStatusAbnormal(account.id, 'Token 已过期或无效，请更新账号 token')
+      await markAccountStatusAbnormal(account.id, 'Token 已过期或无效，请更新账号 token')
       if (!hasShownTokenExpiredHint.value) {
         showWarningToast('该空间 token 已失效，请更新 token 后重试同步')
         hasShownTokenExpiredHint.value = true
@@ -972,7 +1000,7 @@ const handleSyncUserCount = async (account: GptAccount) => {
     showSuccessToast('同步成功')
   } catch (err: any) {
     if (isTokenInvalidError(err)) {
-      markAccountStatusAbnormal(account.id, 'Token 已过期或无效，请更新账号 token')
+      await markAccountStatusAbnormal(account.id, 'Token 已过期或无效，请更新账号 token')
       if (!hasShownTokenExpiredHint.value) {
         showErrorToast('Token 已过期或无效，请更新账号 token 后重试同步')
         hasShownTokenExpiredHint.value = true
@@ -1293,9 +1321,10 @@ const handleInviteSubmit = async () => {
                 <td class="px-6 py-5">
                   <span
                     class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium"
-                    :class="resolveAccountStatus(account).code === 'normal' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'"
+                    :class="resolveStatusBadgeClass(account)"
                   >
                     <CheckCircle2 v-if="resolveAccountStatus(account).code === 'normal'" class="w-3.5 h-3.5" />
+                    <AlertTriangle v-else-if="resolveAccountStatus(account).code === 'unknown'" class="w-3.5 h-3.5" />
                     <AlertCircle v-else class="w-3.5 h-3.5" />
                     {{ resolveAccountStatus(account).reason }}
                   </span>
@@ -1409,7 +1438,7 @@ const handleInviteSubmit = async () => {
                  >
                    {{ account.isDemoted ? '已降级' : '未降级' }}
                  </span>
-                 <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border" :class="resolveAccountStatus(account).code === 'normal' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-red-50 text-red-700 border-red-100'">{{ resolveAccountStatus(account).reason }}</span>
+                 <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border" :class="resolveStatusBadgeClass(account)">{{ resolveAccountStatus(account).reason }}</span>
               </div>
             </div>
 
