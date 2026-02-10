@@ -88,6 +88,12 @@ const resolveSpaceStatus = (account) => {
   if (statusCode === 'abnormal') {
     return { code: 'abnormal', reason: statusReason || '空间异常' }
   }
+  if (statusCode === 'unknown') {
+    return { code: 'unknown', reason: statusReason || '状态待确认' }
+  }
+  if (statusCode === 'normal') {
+    return { code: 'normal', reason: statusReason || '正常' }
+  }
 
   if (Boolean(account?.isBanned)) {
     return { code: 'abnormal', reason: '账号被封' }
@@ -103,7 +109,7 @@ const resolveSpaceStatus = (account) => {
     return { code: 'abnormal', reason: `超员（${userCount}/${SPACE_MEMBER_LIMIT}）` }
   }
 
-  return { code: 'normal', reason: statusReason || '正常' }
+  return { code: 'unknown', reason: statusReason || '状态待确认' }
 }
 
 const isTokenInvalidSyncError = (error) => {
@@ -114,7 +120,8 @@ const isTokenInvalidSyncError = (error) => {
 }
 
 const markAccountSpaceStatus = async (db, accountId, { code, reason = '' } = {}) => {
-  const normalizedCode = String(code || '').trim().toLowerCase() === 'abnormal' ? 'abnormal' : 'normal'
+  const normalizedInputCode = String(code || '').trim().toLowerCase()
+  const normalizedCode = ['normal', 'abnormal', 'unknown'].includes(normalizedInputCode) ? normalizedInputCode : 'unknown'
   const normalizedReason = String(reason || '').trim()
   try {
     db.run(
@@ -130,6 +137,55 @@ const markAccountSpaceStatus = async (db, accountId, { code, reason = '' } = {})
     saveDatabase()
   } catch (error) {
     console.warn('[GptAccounts] skip space status update (legacy schema):', error?.message || error)
+  }
+}
+
+const getAccountById = (db, accountId) => {
+  const result = db.exec(
+    `
+      SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
+             COALESCE(is_demoted, 0) AS is_demoted,
+             COALESCE(is_banned, 0) AS is_banned,
+             COALESCE(sort_order, id) AS sort_order,
+             COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
+             COALESCE(space_status_code, 'unknown') AS space_status_code,
+             space_status_reason,
+             created_at, updated_at
+      FROM gpt_accounts
+      WHERE id = ?
+    `,
+    [accountId]
+  )
+  if (!result[0]?.values?.length) return null
+  const row = result[0].values[0]
+  const spaceStatusCode = row[14] || 'unknown'
+  const spaceStatusReason = row[15] || ''
+
+  return {
+    id: row[0],
+    email: row[1],
+    token: row[2],
+    refreshToken: row[3],
+    userCount: row[4],
+    inviteCount: row[5],
+    chatgptAccountId: row[6],
+    oaiDeviceId: row[7],
+    expireAt: row[8] || null,
+    isOpen: Boolean(row[9]),
+    isDemoted: Boolean(row[10]),
+    isBanned: Boolean(row[11]),
+    sortOrder: Number(row[12] || 0),
+    spaceType: row[13] || SPACE_TYPE_CHILD,
+    spaceStatusCode,
+    spaceStatusReason,
+    createdAt: row[16],
+    updatedAt: row[17],
+    spaceStatus: resolveSpaceStatus({
+      isBanned: Boolean(row[11]),
+      token: row[2],
+      spaceStatusCode,
+      spaceStatusReason
+    })
   }
 }
 
@@ -278,7 +334,7 @@ router.get('/', async (req, res) => {
                COALESCE(is_banned, 0) AS is_banned,
                COALESCE(sort_order, id) AS sort_order,
                COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
-               COALESCE(space_status_code, 'normal') AS space_status_code,
+               COALESCE(space_status_code, 'unknown') AS space_status_code,
                space_status_reason,
                created_at, updated_at
         FROM gpt_accounts
@@ -823,7 +879,7 @@ router.patch('/:id/ban', async (req, res) => {
                COALESCE(is_banned, 0) AS is_banned,
                COALESCE(sort_order, id) AS sort_order,
                COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
-               COALESCE(space_status_code, 'normal') AS space_status_code,
+               COALESCE(space_status_code, 'unknown') AS space_status_code,
                space_status_reason,
                created_at, updated_at
         FROM gpt_accounts
@@ -847,7 +903,7 @@ router.patch('/:id/ban', async (req, res) => {
       isBanned: Boolean(row[11]),
       sortOrder: Number(row[12] || 0),
       spaceType: row[13] || SPACE_TYPE_CHILD,
-      spaceStatusCode: row[14] || 'normal',
+      spaceStatusCode: row[14] || 'unknown',
       spaceStatusReason: row[15] || '',
       createdAt: row[16],
       updatedAt: row[17],
@@ -858,6 +914,38 @@ router.patch('/:id/ban', async (req, res) => {
   } catch (error) {
     console.error('Ban GPT account error:', error)
     res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+router.patch('/:id/space-status', async (req, res) => {
+  try {
+    const accountId = Number(req.params.id)
+    if (!Number.isFinite(accountId)) {
+      return res.status(400).json({ error: 'Invalid account id' })
+    }
+
+    const rawCode = String(req.body?.code ?? req.body?.spaceStatusCode ?? '').trim().toLowerCase()
+    const code = ['normal', 'abnormal', 'unknown'].includes(rawCode) ? rawCode : null
+    if (!code) {
+      return res.status(400).json({ error: 'Invalid space status code' })
+    }
+
+    const reason = String(req.body?.reason ?? req.body?.spaceStatusReason ?? '').trim()
+    const db = await getDatabase()
+    const existing = db.exec('SELECT id FROM gpt_accounts WHERE id = ?', [accountId])
+    if (!existing[0]?.values?.length) {
+      return res.status(404).json({ error: 'Account not found' })
+    }
+
+    await markAccountSpaceStatus(db, accountId, { code, reason })
+    const account = getAccountById(db, accountId)
+    return res.json({
+      message: '空间状态更新成功',
+      account
+    })
+  } catch (error) {
+    console.error('Update GPT account space status error:', error)
+    return res.status(500).json({ error: 'Internal server error' })
   }
 })
 
