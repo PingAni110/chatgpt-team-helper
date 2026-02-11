@@ -60,6 +60,16 @@ const requestGuard = createRequestGuard()
 const resolveAccountStatus = (account: GptAccount) => {
   const rawStatusCode = String(account.spaceStatus?.code || account.spaceStatusCode || '').trim().toLowerCase()
   const statusReason = String(account.spaceStatus?.reason || account.spaceStatusReason || '').trim()
+  const userCount = Number(account.userCount ?? 0)
+
+  if (Number.isFinite(userCount)) {
+    if (userCount > 5) {
+      return { code: 'abnormal' as const, reason: `超员（${userCount}人）` }
+    }
+    if (userCount === 5) {
+      return { code: 'normal' as const, reason: '满员' }
+    }
+  }
 
   if (rawStatusCode === 'normal') return { code: 'normal' as const, reason: statusReason || '正常' }
   if (rawStatusCode === 'abnormal') return { code: 'abnormal' as const, reason: statusReason || '空间异常' }
