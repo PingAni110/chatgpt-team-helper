@@ -1412,6 +1412,7 @@ export interface GptAccountsListParams {
   search?: string
   openStatus?: 'open' | 'closed'
   spaceType?: 'mother' | 'child'
+  spaceStatus?: 'normal' | 'abnormal' | 'unknown'
 }
 
 export interface GptAccountsListResponse {

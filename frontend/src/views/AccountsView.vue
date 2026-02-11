@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted, nextTick, watch } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter, useRoute, type LocationQueryRaw } from 'vue-router'
 import { authService, gptAccountService, openaiOAuthService, userService, type GptAccount, type CreateGptAccountDto, type SyncUserCountResponse, type GptAccountsListParams, type ChatgptAccountInviteItem, type ChatgptAccountCheckInfo, type OpenAIOAuthSession, type OpenAIOAuthExchangeResult } from '@/services/api'
 import { formatShanghaiDate } from '@/lib/datetime'
 import { useAppConfigStore } from '@/stores/appConfig'
@@ -68,13 +68,6 @@ const resolveAccountStatus = (account: GptAccount) => {
   return { code: 'unknown' as const, reason: statusReason || '状态待确认' }
 }
 
-const displayedAccounts = computed(() => {
-  return accounts.value.filter((account) => {
-    const status = resolveAccountStatus(account)
-    return activeSpaceTab.value === 'normal' ? status.code === 'normal' : status.code !== 'normal'
-  })
-})
-
 const resolveStatusBadgeClass = (account: GptAccount) => {
   const status = resolveAccountStatus(account)
   if (status.code === 'normal') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
@@ -106,7 +99,7 @@ onMounted(async () => {
   })
   spaceTypeFilter.value = initialSpaceType
   writeSpaceTypeStorage(initialSpaceType)
-  const mergedQuery = buildSpaceTypeQuery(buildSpaceTabQuery(route.query, initialTab), initialSpaceType)
+  const mergedQuery = buildSpaceTypeQuery(buildSpaceTabQuery(route.query, initialTab), initialSpaceType) as LocationQueryRaw
   if (route.query.spaceStatus !== initialTab || route.query.spaceType !== initialSpaceType) {
     router.replace({ query: mergedQuery })
   }
@@ -602,6 +595,7 @@ const loadAccounts = async () => {
       params.openStatus = openStatusFilter.value
     }
     params.spaceType = spaceTypeFilter.value
+    params.spaceStatus = activeSpaceTab.value === 'normal' ? 'normal' : 'abnormal'
     const response = await gptAccountService.getAll(params)
     if (!requestGuard.isLatest(requestId)) return
     const normalizedAccounts = (response.accounts || []).map((item: any) => {
@@ -639,11 +633,8 @@ const loadAccounts = async () => {
 
 // 搜索处理
 const handleSpaceTabChange = (tab: 'normal' | 'abnormal') => {
-  if (activeSpaceTab.value === tab) return
-  activeSpaceTab.value = tab
-  paginationMeta.value.page = 1
-  router.replace({ query: buildSpaceTabQuery(route.query, tab) })
-  writeSpaceTabStorage(tab)
+  if (resolveSpaceTab(route.query.spaceStatus) === tab) return
+  router.replace({ query: buildSpaceTabQuery(route.query, tab) as LocationQueryRaw })
 }
 
 const handleSearch = () => {
@@ -666,14 +657,9 @@ watch(openStatusFilter, () => {
 })
 
 watch(spaceTypeFilter, (value) => {
-  paginationMeta.value.page = 1
-  if (searchDebounceTimer) {
-    clearTimeout(searchDebounceTimer)
-    searchDebounceTimer = null
-  }
+  if (resolveSpaceType(route.query.spaceType) === value) return
   writeSpaceTypeStorage(value)
-  router.replace({ query: buildSpaceTypeQuery(route.query, value) })
-  loadAccounts()
+  router.replace({ query: buildSpaceTypeQuery(route.query, value) as LocationQueryRaw })
 })
 
 watch(searchQuery, () => {
@@ -693,8 +679,14 @@ watch(
     const nextTab = resolveSpaceTab(value)
     if (activeSpaceTab.value !== nextTab) {
       activeSpaceTab.value = nextTab
-      writeSpaceTabStorage(nextTab)
     }
+    writeSpaceTabStorage(nextTab)
+    paginationMeta.value.page = 1
+    if (searchDebounceTimer) {
+      clearTimeout(searchDebounceTimer)
+      searchDebounceTimer = null
+    }
+    loadAccounts()
   }
 )
 
@@ -704,8 +696,17 @@ watch(
     const nextType = resolveSpaceType(value)
     if (spaceTypeFilter.value !== nextType) {
       spaceTypeFilter.value = nextType
-      writeSpaceTypeStorage(nextType)
     }
+    writeSpaceTypeStorage(nextType)
+    paginationMeta.value = {
+      ...paginationMeta.value,
+      page: 1
+    }
+    if (searchDebounceTimer) {
+      clearTimeout(searchDebounceTimer)
+      searchDebounceTimer = null
+    }
+    loadAccounts()
   }
 )
 
@@ -1233,7 +1234,7 @@ const handleInviteSubmit = async () => {
       </div>
 
       <!-- Empty State -->
-      <div v-else-if="accounts.length === 0 && activeSpaceTab === 'normal'" class="flex flex-col items-center justify-center py-24 text-center">
+      <div v-else-if="accounts.length === 0" class="flex flex-col items-center justify-center py-24 text-center">
         <div class="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mb-4">
           <FolderOpen class="w-8 h-8 text-gray-400" />
         </div>
@@ -1253,12 +1254,8 @@ const handleInviteSubmit = async () => {
             <button class="px-4 py-1.5 rounded-lg" :class="activeSpaceTab === 'abnormal' ? 'bg-white shadow text-gray-900' : 'text-gray-500'" @click="handleSpaceTabChange('abnormal')">异常空间</button>
           </div>
         </div>
-        <div v-if="displayedAccounts.length === 0" class="px-6 py-12 text-center text-gray-500">
-          当前筛选下暂无账号，请切换标签查看。
-        </div>
-
         <!-- Desktop Table -->
-        <div v-else class="hidden md:block overflow-x-auto">
+        <div class="hidden md:block overflow-x-auto">
           <table class="w-full">
             <thead>
               <tr class="border-b border-gray-100 bg-gray-50/50">
@@ -1276,7 +1273,7 @@ const handleInviteSubmit = async () => {
             </thead>
             <tbody class="divide-y divide-gray-50">
               <tr
-                v-for="account in displayedAccounts"
+                v-for="account in accounts"
                 :key="account.id"
                 class="group hover:bg-blue-50/30 transition-colors duration-200"
               >
@@ -1414,7 +1411,7 @@ const handleInviteSubmit = async () => {
 
         <!-- Mobile Card List -->
         <div class="md:hidden p-4 space-y-4 bg-gray-50/50">
-          <div v-for="account in displayedAccounts" :key="account.id" class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+          <div v-for="account in accounts" :key="account.id" class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
             <div class="flex items-start justify-between mb-4">
               <div class="flex items-center gap-3">
                  <div class="w-10 h-10 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center text-sm font-bold text-gray-600">
