@@ -289,7 +289,7 @@ function buildOpenAccountsSweeperBody(summary) {
 
   const htmlParts = [
     `<p>开放账号超员扫描已完成。</p>`,
-    `<p>扫描账号数：${scannedCount ?? 0}，阈值：joined &gt; ${maxJoined ?? ''}，本次踢出：${totalKicked ?? 0}，异常空间数量：${derivedAbnormalSpaceCount}</p>`,
+    `<p>扫描数：${scannedCount ?? 0}，异常：${derivedAbnormalSpaceCount}，本次踢出：${totalKicked ?? 0}，阈值：joined &gt; ${maxJoined ?? ''}</p>`,
     ...(Number(scanCreatedWithinDays) > 0 ? [`<p>扫描范围：最近 ${scanCreatedWithinDays} 天创建的开放账号</p>`] : []),
   ]
 
@@ -353,7 +353,7 @@ function buildOpenAccountsSweeperBody(summary) {
 
   return {
     html: htmlParts.join('\n'),
-    text: `开放账号超员扫描已完成。\n扫描账号数：${scannedCount ?? 0}，阈值：${maxJoined ?? ''}，本次踢出：${totalKicked ?? 0}，异常空间数量：${derivedAbnormalSpaceCount}${Number(scanCreatedWithinDays) > 0 ? `\n扫描范围：最近 ${scanCreatedWithinDays} 天创建的开放账号` : ''}${textFailures}\n\n${textRows}${textTime}`
+    text: `开放账号超员扫描已完成。\n扫描数：${scannedCount ?? 0}，异常：${derivedAbnormalSpaceCount}，本次踢出：${totalKicked ?? 0}，阈值：${maxJoined ?? ''}${Number(scanCreatedWithinDays) > 0 ? `\n扫描范围：最近 ${scanCreatedWithinDays} 天创建的开放账号` : ''}${textFailures}\n\n${textRows}${textTime}`
   }
 }
 
