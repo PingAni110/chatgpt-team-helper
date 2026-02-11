@@ -1227,6 +1227,27 @@ const handleInviteSubmit = async () => {
     <!-- Main Content -->
     <div class="bg-white rounded-[32px] shadow-sm border border-gray-100 overflow-hidden min-h-[400px]">
       
+      <div class="px-6 pt-5">
+        <div class="inline-flex rounded-xl bg-gray-100 p-1 text-sm">
+          <button
+            class="px-4 py-1.5 rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+            :class="activeSpaceTab === 'normal' ? 'bg-white shadow text-gray-900' : 'text-gray-500'"
+            :disabled="loading"
+            @click="handleSpaceTabChange('normal')"
+          >
+            正常空间
+          </button>
+          <button
+            class="px-4 py-1.5 rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+            :class="activeSpaceTab === 'abnormal' ? 'bg-white shadow text-gray-900' : 'text-gray-500'"
+            :disabled="loading"
+            @click="handleSpaceTabChange('abnormal')"
+          >
+            异常空间
+          </button>
+        </div>
+      </div>
+
       <!-- Loading State -->
       <div v-if="loading" class="flex flex-col items-center justify-center py-20">
         <div class="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
@@ -1248,12 +1269,6 @@ const handleInviteSubmit = async () => {
 
       <!-- Table & Mobile List -->
       <div v-else>
-        <div class="px-6 pt-5">
-          <div class="inline-flex rounded-xl bg-gray-100 p-1 text-sm">
-            <button class="px-4 py-1.5 rounded-lg" :class="activeSpaceTab === 'normal' ? 'bg-white shadow text-gray-900' : 'text-gray-500'" @click="handleSpaceTabChange('normal')">正常空间</button>
-            <button class="px-4 py-1.5 rounded-lg" :class="activeSpaceTab === 'abnormal' ? 'bg-white shadow text-gray-900' : 'text-gray-500'" @click="handleSpaceTabChange('abnormal')">异常空间</button>
-          </div>
-        </div>
         <!-- Desktop Table -->
         <div class="hidden md:block overflow-x-auto">
           <table class="w-full">
