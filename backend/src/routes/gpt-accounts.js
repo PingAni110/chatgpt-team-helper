@@ -315,6 +315,12 @@ router.get('/', async (req, res) => {
     const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 10))
     const search = (req.query.search || '').trim().toLowerCase()
     const openStatus = req.query.openStatus // 'open' | 'closed' | undefined
+    const rawSpaceStatus = req.query.spaceStatus ?? req.query.space_status
+    const hasSpaceStatus = rawSpaceStatus != null && String(rawSpaceStatus).trim() !== ''
+    const normalizedSpaceStatus = hasSpaceStatus ? String(rawSpaceStatus).trim().toLowerCase() : null
+    if (hasSpaceStatus && !['normal', 'abnormal', 'unknown'].includes(normalizedSpaceStatus)) {
+      return res.status(400).json({ error: 'Invalid spaceStatus' })
+    }
     const rawSpaceType = req.query.spaceType ?? req.query.space_type
     const hasSpaceType = rawSpaceType != null && String(rawSpaceType).trim() !== ''
     const normalizedSpaceType = hasSpaceType ? normalizeSpaceTypeInput(rawSpaceType, null) : null
@@ -337,6 +343,15 @@ router.get('/', async (req, res) => {
     } else if (openStatus === 'closed') {
       conditions.push('(is_open = 0 OR is_open IS NULL)')
     }
+
+    if (normalizedSpaceStatus === 'normal') {
+      conditions.push("COALESCE(space_status_code, 'unknown') = 'normal'")
+    } else if (normalizedSpaceStatus === 'abnormal') {
+      conditions.push("COALESCE(space_status_code, 'unknown') != 'normal'")
+    } else if (normalizedSpaceStatus === 'unknown') {
+      conditions.push("COALESCE(space_status_code, 'unknown') = 'unknown'")
+    }
+
     if (normalizedSpaceType) {
       conditions.push(`COALESCE(space_type, '${SPACE_TYPE_CHILD}') = ?`)
       params.push(normalizedSpaceType)
