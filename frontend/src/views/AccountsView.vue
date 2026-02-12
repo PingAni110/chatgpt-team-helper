@@ -62,17 +62,24 @@ const resolveAccountStatus = (account: GptAccount) => {
   const statusReason = String(account.spaceStatus?.reason || account.spaceStatusReason || '').trim()
   const userCount = Number(account.userCount ?? 0)
 
-  if (Number.isFinite(userCount)) {
-    if (userCount > 5) {
-      return { code: 'abnormal' as const, reason: `超员（${userCount}人）` }
-    }
-    if (userCount === 5) {
-      return { code: 'normal' as const, reason: '满员' }
-    }
+  // 优先展示后端持久化状态，避免“到期/异常”被人数文案覆盖。
+  if (rawStatusCode === 'abnormal') return { code: 'abnormal' as const, reason: statusReason || '空间异常' }
+
+  if (Number.isFinite(userCount) && userCount > 5) {
+    return { code: 'abnormal' as const, reason: `超员（${userCount}人）` }
   }
 
-  if (rawStatusCode === 'normal') return { code: 'normal' as const, reason: statusReason || '正常' }
-  if (rawStatusCode === 'abnormal') return { code: 'abnormal' as const, reason: statusReason || '空间异常' }
+  if (rawStatusCode === 'normal') {
+    if (Number.isFinite(userCount) && userCount === 5) {
+      return { code: 'normal' as const, reason: '满员' }
+    }
+    return { code: 'normal' as const, reason: statusReason || '正常' }
+  }
+
+  if (Number.isFinite(userCount) && userCount === 5) {
+    return { code: 'normal' as const, reason: '满员' }
+  }
+
   if (rawStatusCode === 'unknown') return { code: 'unknown' as const, reason: statusReason || '状态待确认' }
 
   return { code: 'unknown' as const, reason: statusReason || '状态待确认' }
@@ -197,6 +204,16 @@ const isTokenInvalidError = (err: any) => {
   const message = String(err?.response?.data?.error || err?.response?.data?.message || err?.message || '').toLowerCase()
   if (status === 401 || status === 403) return true
   return /token.*(过期|无效|invalid|expired)|unauthorized|invalid token/.test(message)
+}
+
+
+const isWorkspaceExpiredSyncError = (err: any) => {
+  const status = Number(err?.response?.status ?? err?.status ?? 0)
+  const code = String(err?.response?.data?.code || err?.code || '').trim().toLowerCase()
+  const message = String(err?.response?.data?.error || err?.response?.data?.message || err?.message || '').trim()
+  if (code === 'deactivated_workspace') return true
+  if (status !== 402) return false
+  return /空间已到期|到期|deactivated_workspace/i.test(message)
 }
 
 const markAccountStatusAbnormal = async (accountId: number, reason: string) => {
@@ -980,7 +997,11 @@ const handleShowMembers = async (account: GptAccount) => {
     loadInvites(account.id)
   } catch (err: any) {
     syncError.value = err.response?.data?.error || '获取成员信息失败'
-    if (isTokenInvalidError(err)) {
+    if (isWorkspaceExpiredSyncError(err)) {
+      await markAccountStatusAbnormal(account.id, '到期')
+      syncError.value = '空间已到期'
+      showErrorToast('空间已到期')
+    } else if (isTokenInvalidError(err)) {
       await markAccountStatusAbnormal(account.id, 'Token 已过期或无效，请更新账号 token')
       if (!hasShownTokenExpiredHint.value) {
         showWarningToast('该空间 token 已失效，请更新 token 后重试同步')
@@ -1010,7 +1031,10 @@ const handleSyncUserCount = async (account: GptAccount) => {
     // 同步后仅更新列表，不弹出成员信息
     showSuccessToast('同步成功')
   } catch (err: any) {
-    if (isTokenInvalidError(err)) {
+    if (isWorkspaceExpiredSyncError(err)) {
+      await markAccountStatusAbnormal(account.id, '到期')
+      showErrorToast('空间已到期')
+    } else if (isTokenInvalidError(err)) {
       await markAccountStatusAbnormal(account.id, 'Token 已过期或无效，请更新账号 token')
       if (!hasShownTokenExpiredHint.value) {
         showErrorToast('Token 已过期或无效，请更新账号 token 后重试同步')

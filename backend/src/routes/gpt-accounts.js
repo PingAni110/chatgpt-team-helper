@@ -4,7 +4,7 @@ import { getDatabase, saveDatabase } from '../database/init.js'
 import { authenticateToken } from '../middleware/auth.js'
 import { apiKeyAuth } from '../middleware/api-key-auth.js'
 import { requireMenu } from '../middleware/rbac.js'
-import { syncAccountUserCount, syncAccountInviteCount, fetchOpenAiAccountInfo, AccountSyncError, deleteAccountUser, inviteAccountUser, deleteAccountInvite } from '../services/account-sync.js'
+import { syncAccountUserCount, syncAccountInviteCount, fetchOpenAiAccountInfo, AccountSyncError, deleteAccountUser, inviteAccountUser, deleteAccountInvite, isWorkspaceExpiredSyncError } from '../services/account-sync.js'
 import { SPACE_MEMBER_LIMIT, calcRedeemableSlots, normalizeMemberCount } from '../utils/space-capacity.js'
 import { SPACE_TYPE_CHILD, normalizeSpaceType, shouldAutoGenerateCodes } from '../utils/space-type.js'
 import { withLocks } from '../utils/locks.js'
@@ -111,6 +111,9 @@ const resolveSpaceStatus = (account) => {
 
   return { code: 'unknown', reason: statusReason || '状态待确认' }
 }
+
+
+const getWorkspaceExpiredReason = () => '到期'
 
 const isTokenInvalidSyncError = (error) => {
   const status = Number(error?.status ?? error?.statusCode ?? 0)
@@ -1049,7 +1052,10 @@ router.post('/sync-all', async (req, res) => {
         if (isTokenInvalidSyncError(error)) {
           await markAccountSpaceStatus(db, accountId, { code: 'abnormal', reason: 'Token 已过期或无效，请更新账号 token' })
         }
-        results.push({ id: accountId, ok: false, error: error?.message || '同步失败' })
+        if (isWorkspaceExpiredSyncError(error)) {
+          await markAccountSpaceStatus(db, accountId, { code: 'abnormal', reason: getWorkspaceExpiredReason() })
+        }
+        results.push({ id: accountId, ok: false, error: error?.message || '同步失败', code: error?.code || null })
       }
     }
 
@@ -1112,7 +1118,11 @@ router.post('/:id/sync-user-count', async (req, res) => {
         const db = await getDatabase()
         await markAccountSpaceStatus(db, Number(req.params.id), { code: 'abnormal', reason: 'Token 已过期或无效，请更新账号 token' })
       }
-      return res.status(error.status || 500).json({ error: error.message })
+      if (isWorkspaceExpiredSyncError(error)) {
+        const db = await getDatabase()
+        await markAccountSpaceStatus(db, Number(req.params.id), { code: 'abnormal', reason: getWorkspaceExpiredReason() })
+      }
+      return res.status(error.status || 500).json({ error: error.message, code: error?.code || null })
     }
 
     res.status(500).json({ error: '内部服务器错误' })
