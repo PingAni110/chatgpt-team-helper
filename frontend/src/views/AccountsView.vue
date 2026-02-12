@@ -199,6 +199,16 @@ const isTokenInvalidError = (err: any) => {
   return /token.*(过期|无效|invalid|expired)|unauthorized|invalid token/.test(message)
 }
 
+
+const isWorkspaceExpiredSyncError = (err: any) => {
+  const status = Number(err?.response?.status ?? err?.status ?? 0)
+  const code = String(err?.response?.data?.code || err?.code || '').trim().toLowerCase()
+  const message = String(err?.response?.data?.error || err?.response?.data?.message || err?.message || '').trim()
+  if (code === 'deactivated_workspace') return true
+  if (status !== 402) return false
+  return /空间已到期|到期|deactivated_workspace/i.test(message)
+}
+
 const markAccountStatusAbnormal = async (accountId: number, reason: string) => {
   const idx = accounts.value.findIndex(item => item.id === accountId)
   if (idx === -1) return
@@ -980,7 +990,11 @@ const handleShowMembers = async (account: GptAccount) => {
     loadInvites(account.id)
   } catch (err: any) {
     syncError.value = err.response?.data?.error || '获取成员信息失败'
-    if (isTokenInvalidError(err)) {
+    if (isWorkspaceExpiredSyncError(err)) {
+      await markAccountStatusAbnormal(account.id, '到期')
+      syncError.value = '空间已到期'
+      showErrorToast('空间已到期')
+    } else if (isTokenInvalidError(err)) {
       await markAccountStatusAbnormal(account.id, 'Token 已过期或无效，请更新账号 token')
       if (!hasShownTokenExpiredHint.value) {
         showWarningToast('该空间 token 已失效，请更新 token 后重试同步')
@@ -1010,7 +1024,10 @@ const handleSyncUserCount = async (account: GptAccount) => {
     // 同步后仅更新列表，不弹出成员信息
     showSuccessToast('同步成功')
   } catch (err: any) {
-    if (isTokenInvalidError(err)) {
+    if (isWorkspaceExpiredSyncError(err)) {
+      await markAccountStatusAbnormal(account.id, '到期')
+      showErrorToast('空间已到期')
+    } else if (isTokenInvalidError(err)) {
       await markAccountStatusAbnormal(account.id, 'Token 已过期或无效，请更新账号 token')
       if (!hasShownTokenExpiredHint.value) {
         showErrorToast('Token 已过期或无效，请更新账号 token 后重试同步')

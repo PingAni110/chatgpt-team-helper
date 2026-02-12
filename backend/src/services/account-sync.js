@@ -4,11 +4,23 @@ import { loadProxyList, parseProxyConfig } from '../utils/proxy.js'
 import { SPACE_MEMBER_LIMIT, hasAvailableSeat } from '../utils/space-capacity.js'
 
 export class AccountSyncError extends Error {
-  constructor(message, status = 500) {
+  constructor(message, status = 500, code = '') {
     super(message)
     this.name = 'AccountSyncError'
     this.status = status
+    this.code = code
   }
+}
+
+const WORKSPACE_EXPIRED_SYNC_ERROR_CODE = 'deactivated_workspace'
+
+export const isWorkspaceExpiredSyncError = (error) => {
+  const status = Number(error?.status ?? error?.statusCode ?? 0)
+  const code = String(error?.code || error?.errorCode || '').trim().toLowerCase()
+  const message = String(error?.message || '').trim()
+  if (code === WORKSPACE_EXPIRED_SYNC_ERROR_CODE) return true
+  if (status !== 402) return false
+  return /空间已到期|到期|deactivated_workspace/i.test(message)
 }
 
 const DEFAULT_PROXY_CACHE_TTL_MS = 60_000
@@ -393,7 +405,7 @@ const throwChatgptApiStatusError = async ({ status, errorText, logContext, label
   if (rawErrorText) {
     try {
       const parsed = JSON.parse(rawErrorText)
-      const code = parsed?.error?.code || parsed?.code
+      const code = parsed?.error?.code || parsed?.code || parsed?.detail?.code
       if (code === 'account_deactivated') {
         const accountId = Number(logContext?.accountId)
         if (Number.isFinite(accountId)) {
@@ -422,7 +434,14 @@ const throwChatgptApiStatusError = async ({ status, errorText, logContext, label
 
         throw new AccountSyncError('OpenAI 账号已停用（account_deactivated），已自动标记为封号', 401)
       }
-    } catch {
+
+      if (code === WORKSPACE_EXPIRED_SYNC_ERROR_CODE) {
+        throw new AccountSyncError('空间已到期', 402, WORKSPACE_EXPIRED_SYNC_ERROR_CODE)
+      }
+    } catch (error) {
+      if (error instanceof AccountSyncError) {
+        throw error
+      }
       // ignore parse errors
     }
   }
