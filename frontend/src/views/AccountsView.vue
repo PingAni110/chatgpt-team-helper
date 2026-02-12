@@ -62,17 +62,24 @@ const resolveAccountStatus = (account: GptAccount) => {
   const statusReason = String(account.spaceStatus?.reason || account.spaceStatusReason || '').trim()
   const userCount = Number(account.userCount ?? 0)
 
-  if (Number.isFinite(userCount)) {
-    if (userCount > 5) {
-      return { code: 'abnormal' as const, reason: `超员（${userCount}人）` }
-    }
-    if (userCount === 5) {
-      return { code: 'normal' as const, reason: '满员' }
-    }
+  // 优先展示后端持久化状态，避免“到期/异常”被人数文案覆盖。
+  if (rawStatusCode === 'abnormal') return { code: 'abnormal' as const, reason: statusReason || '空间异常' }
+
+  if (Number.isFinite(userCount) && userCount > 5) {
+    return { code: 'abnormal' as const, reason: `超员（${userCount}人）` }
   }
 
-  if (rawStatusCode === 'normal') return { code: 'normal' as const, reason: statusReason || '正常' }
-  if (rawStatusCode === 'abnormal') return { code: 'abnormal' as const, reason: statusReason || '空间异常' }
+  if (rawStatusCode === 'normal') {
+    if (Number.isFinite(userCount) && userCount === 5) {
+      return { code: 'normal' as const, reason: '满员' }
+    }
+    return { code: 'normal' as const, reason: statusReason || '正常' }
+  }
+
+  if (Number.isFinite(userCount) && userCount === 5) {
+    return { code: 'normal' as const, reason: '满员' }
+  }
+
   if (rawStatusCode === 'unknown') return { code: 'unknown' as const, reason: statusReason || '状态待确认' }
 
   return { code: 'unknown' as const, reason: statusReason || '状态待确认' }
