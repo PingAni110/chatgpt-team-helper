@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken'
+import { getJwtSecret } from '../utils/env-secrets.js'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production'
 const JWT_ALGORITHMS = ['HS256']
 
 export function authenticateToken(req, res, next) {
@@ -12,7 +12,7 @@ export function authenticateToken(req, res, next) {
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: JWT_ALGORITHMS })
+    const decoded = jwt.verify(token, getJwtSecret(), { algorithms: JWT_ALGORITHMS })
     req.user = decoded
     next()
   } catch (error) {

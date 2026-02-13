@@ -1,7 +1,6 @@
 import jwt from 'jsonwebtoken'
+import { getLinuxdoSessionSecret } from '../utils/env-secrets.js'
 
-const ADMIN_JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production'
-const LINUXDO_SESSION_SECRET = process.env.LINUXDO_SESSION_SECRET || `${ADMIN_JWT_SECRET}::linuxdo`
 const LINUXDO_SESSION_ALGORITHMS = ['HS256']
 
 const normalizeString = (value) => String(value ?? '').trim()
@@ -28,7 +27,7 @@ export function signLinuxDoSessionToken(payload, options = {}) {
   const expiresIn = options.expiresIn || '24h'
   return jwt.sign(
     tokenPayload,
-    LINUXDO_SESSION_SECRET,
+    getLinuxdoSessionSecret(),
     { expiresIn, algorithm: 'HS256' }
   )
 }
@@ -37,7 +36,7 @@ export function verifyLinuxDoSessionToken(rawToken) {
   const token = normalizeString(rawToken)
   if (!token) return null
   try {
-    return jwt.verify(token, LINUXDO_SESSION_SECRET, { algorithms: LINUXDO_SESSION_ALGORITHMS })
+    return jwt.verify(token, getLinuxdoSessionSecret(), { algorithms: LINUXDO_SESSION_ALGORITHMS })
   } catch {
     return null
   }
@@ -52,7 +51,7 @@ export function authenticateLinuxDoSession(req, res, next) {
   }
 
   try {
-    const decoded = jwt.verify(token, LINUXDO_SESSION_SECRET, { algorithms: LINUXDO_SESSION_ALGORITHMS })
+    const decoded = jwt.verify(token, getLinuxdoSessionSecret(), { algorithms: LINUXDO_SESSION_ALGORITHMS })
     req.linuxdo = decoded
     next()
   } catch (error) {

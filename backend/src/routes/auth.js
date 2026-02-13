@@ -7,9 +7,9 @@ import { sendVerificationCodeEmail } from '../services/email-service.js'
 import { getEmailDomainWhitelist, isEmailDomainAllowed } from '../utils/email-domain-whitelist.js'
 import { getAdminMenuTreeForAccessContext, getUserAccessContext } from '../services/rbac.js'
 import { safeInsertPointsLedgerEntry } from '../utils/points-ledger.js'
+import { getJwtSecret } from '../utils/env-secrets.js'
 
 const router = express.Router()
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production'
 const JWT_ALGORITHM = 'HS256'
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const INVITE_REGISTER_REWARD_POINTS = 2
@@ -91,7 +91,7 @@ router.post('/login', async (req, res) => {
 
     const token = jwt.sign(
       { id: user.id, username: user.username },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: '24h', algorithm: JWT_ALGORITHM }
     )
 
@@ -257,7 +257,7 @@ router.post('/register', async (req, res) => {
     const inviteEnabled = Number(inviteEnabledResult[0]?.values?.[0]?.[0] ?? 1) !== 0
     const token = jwt.sign(
       { id: userId, username: email },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: '24h', algorithm: JWT_ALGORITHM }
     )
 
