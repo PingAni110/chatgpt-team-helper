@@ -12,9 +12,9 @@ import { safeInsertPointsLedgerEntry } from '../utils/points-ledger.js'
 import { getZpaySettings } from '../utils/zpay-settings.js'
 import { sendTelegramBotNotification } from '../services/telegram-notifier.js'
 import { requireFeatureEnabled } from '../middleware/feature-flags.js'
+import { getJwtSecret } from '../utils/env-secrets.js'
 
 const router = express.Router()
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production'
 
 router.use(requireFeatureEnabled('payment'))
 
@@ -68,8 +68,11 @@ const getPublicBaseUrl = (req) => {
   if (configured) return configured.replace(/\/+$/, '')
   const protoHeader = req.headers['x-forwarded-proto']
   const protocol = typeof protoHeader === 'string' && protoHeader.trim() ? protoHeader.split(',')[0].trim() : req.protocol
-  const host = req.get('host')
-  return `https://${host}`
+  const host = String(req.get('host') || '').trim()
+  if (!host) {
+    throw new Error('无法生成支付回调地址：请求缺少 host')
+  }
+  return `${protocol}://${host}`
 }
 
 const md5 = (value) => crypto.createHash('md5').update(String(value), 'utf8').digest('hex')
@@ -718,7 +721,7 @@ const getUserIdFromAuthorization = (req) => {
   if (!token) return null
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] })
+    const decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] })
     const id = decoded?.id
     const userId = Number(id)
     return Number.isFinite(userId) && userId > 0 ? userId : null

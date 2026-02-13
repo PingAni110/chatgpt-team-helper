@@ -27,12 +27,13 @@ import { startTelegramBot } from './services/telegram-bot.js'
 import { startXianyuLoginRefreshScheduler } from './services/xianyu-login-refresh.js'
 import { startXhsAutoSyncScheduler } from './services/xhs-auto-sync.js'
 import { startXianyuWsDeliveryBot } from './services/xianyu-ws-delivery.js'
+import { getInsecureDefaultJwtSecret } from './utils/env-secrets.js'
 
 dotenv.config()
 
 const app = express()
 const PORT = process.env.PORT || 3000
-const INSECURE_DEFAULT_JWT_SECRET = 'your-secret-key-change-this-in-production'
+const INSECURE_DEFAULT_JWT_SECRET = getInsecureDefaultJwtSecret()
 
 const isProduction = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production'
 if (isProduction) {
@@ -113,8 +114,13 @@ initDatabase()
 	    startServer()
 	  })
   .catch(error => {
-    console.error('Failed to initialize database:', error)
-    startServer()
+    const dbPath = process.env.DATABASE_PATH || './db/database.sqlite'
+    console.error('[DB] Failed to initialize database. Refusing to start server.', {
+      dbPath,
+      message: error?.message || String(error),
+      hint: '请检查 DATABASE_PATH 路径、文件权限或数据库文件是否损坏'
+    })
+    process.exit(1)
   })
 
 // Routes
