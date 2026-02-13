@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter, useRoute, type LocationQueryRaw } from 'vue-router'
-import { authService, gptAccountService, openaiOAuthService, userService, type GptAccount, type CreateGptAccountDto, type SyncUserCountResponse, type GptAccountsListParams, type ChatgptAccountInviteItem, type ChatgptAccountCheckInfo, type OpenAIOAuthSession, type OpenAIOAuthExchangeResult } from '@/services/api'
+import { authService, gptAccountService, openaiOAuthService, userService, type GptAccount, type CreateGptAccountDto, type SyncUserCountResponse, type SyncAllAccountsResponse, type GptAccountsListParams, type ChatgptAccountInviteItem, type ChatgptAccountCheckInfo, type OpenAIOAuthSession, type OpenAIOAuthExchangeResult } from '@/services/api'
 import { formatShanghaiDate } from '@/lib/datetime'
 import { useAppConfigStore } from '@/stores/appConfig'
 import { buildSpaceTabQuery, buildSpaceTypeQuery, createRequestGuard, readSpaceTabStorage, readSpaceTypeStorage, resolveInitialSpaceTab, resolveInitialSpaceType, resolveSpaceTab, resolveSpaceType, writeSpaceTabStorage, writeSpaceTypeStorage } from '@/lib/accounts-view-state'
@@ -54,6 +54,10 @@ const dateFormatOptions = computed(() => ({
 
 
 const syncingAllAccounts = ref(false)
+const showSyncAllProgressPanel = ref(false)
+const syncAllProgress = ref<SyncAllAccountsResponse | null>(null)
+let syncAllPollingTimer: ReturnType<typeof setTimeout> | null = null
+let syncAllPanelAutoHideTimer: ReturnType<typeof setTimeout> | null = null
 const activeSpaceTab = ref<'normal' | 'abnormal'>('normal')
 const requestGuard = createRequestGuard()
 
@@ -94,6 +98,25 @@ const resolveStatusBadgeClass = (account: GptAccount) => {
 // Teleport 目标是否存在
 const teleportReady = ref(false)
 
+const clearSyncAllPanelAutoHideTimer = () => {
+  if (!syncAllPanelAutoHideTimer) return
+  clearTimeout(syncAllPanelAutoHideTimer)
+  syncAllPanelAutoHideTimer = null
+}
+
+const closeSyncAllProgressPanel = () => {
+  clearSyncAllPanelAutoHideTimer()
+  showSyncAllProgressPanel.value = false
+}
+
+const scheduleCloseSyncAllProgressPanel = () => {
+  clearSyncAllPanelAutoHideTimer()
+  syncAllPanelAutoHideTimer = setTimeout(() => {
+    showSyncAllProgressPanel.value = false
+    syncAllPanelAutoHideTimer = null
+  }, 3000)
+}
+
 onMounted(async () => {
   // 等待 DOM 更新后检查 teleport 目标
   await nextTick()
@@ -130,6 +153,11 @@ onUnmounted(() => {
     clearTimeout(searchDebounceTimer)
     searchDebounceTimer = null
   }
+  if (syncAllPollingTimer) {
+    clearTimeout(syncAllPollingTimer)
+    syncAllPollingTimer = null
+  }
+  clearSyncAllPanelAutoHideTimer()
   cancelResyncAfterAction()
 })
 
@@ -966,17 +994,61 @@ const handleMoveAccount = async (account: GptAccount, direction: 'up' | 'down') 
 
 const handleSyncAllSpaces = async () => {
   if (syncingAllAccounts.value) return
+
+  if (syncAllPollingTimer) {
+    clearTimeout(syncAllPollingTimer)
+    syncAllPollingTimer = null
+  }
+  clearSyncAllPanelAutoHideTimer()
   syncingAllAccounts.value = true
+  showSyncAllProgressPanel.value = true
+  syncAllProgress.value = null
+
+  const pollSyncAllProgress = async (taskId: string) => {
+    try {
+      const progress = await gptAccountService.getSyncAllProgress(taskId)
+      syncAllProgress.value = progress
+
+      if (progress.status === 'running') {
+        syncAllPollingTimer = setTimeout(() => {
+          pollSyncAllProgress(taskId)
+        }, 1000)
+        return
+      }
+
+      const failCount = Number(progress.failedCount || 0)
+      const successCount = Number(progress.successCount || 0)
+      if (progress.status === 'completed') {
+        showSuccessToast(`同步完成：成功 ${successCount}，异常 ${failCount}`)
+        scheduleCloseSyncAllProgressPanel()
+      } else {
+        showErrorToast(`同步任务失败：异常 ${failCount}`)
+      }
+      await loadAccounts()
+    } catch (err: any) {
+      showErrorToast(err?.response?.data?.error || '获取同步进度失败')
+    } finally {
+      syncingAllAccounts.value = false
+      syncAllPollingTimer = null
+    }
+  }
+
   try {
-    const result = await gptAccountService.syncAll()
-    const okCount = (result.results || []).filter(item => item.ok).length
-    const failCount = (result.results || []).length - okCount
-    showSuccessToast(`同步完成：成功 ${okCount}，失败 ${failCount}`)
-    await loadAccounts()
+    const task = await gptAccountService.syncAll()
+    syncAllProgress.value = task
+    if (!task.taskId) {
+      throw new Error('同步任务创建失败：缺少任务ID')
+    }
+    await pollSyncAllProgress(task.taskId)
   } catch (err: any) {
     showErrorToast(err?.response?.data?.error || '一键同步失败')
-  } finally {
     syncingAllAccounts.value = false
+    syncAllPollingTimer = null
+  } finally {
+    if (syncAllPollingTimer) {
+      clearTimeout(syncAllPollingTimer)
+      syncAllPollingTimer = null
+    }
   }
 }
 
@@ -1193,6 +1265,38 @@ const handleInviteSubmit = async () => {
 
 <template>
   <div class="space-y-8">
+    <div
+      v-if="showSyncAllProgressPanel"
+      class="fixed right-6 top-20 z-50 w-80 rounded-2xl border border-gray-200 bg-white/95 p-4 shadow-xl backdrop-blur"
+    >
+      <div class="mb-2 flex items-center justify-between">
+        <div class="text-sm font-semibold text-gray-900">一键同步进度</div>
+        <button
+          type="button"
+          class="rounded-md p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
+          @click="closeSyncAllProgressPanel"
+        >
+          <X class="h-4 w-4" />
+        </button>
+      </div>
+
+      <div v-if="syncAllProgress" class="space-y-2 text-sm text-gray-700">
+        <p>
+          {{ syncAllProgress.status === 'running' ? '同步中' : '同步完成' }}：
+          {{ syncAllProgress.completed }}/{{ syncAllProgress.total }}
+        </p>
+        <p>异常数：{{ syncAllProgress.failedCount }}</p>
+        <div class="h-2 overflow-hidden rounded-full bg-gray-100">
+          <div
+            class="h-full rounded-full bg-blue-500 transition-all duration-300"
+            :style="{ width: `${syncAllProgress.total > 0 ? Math.min(100, Math.round((syncAllProgress.completed / syncAllProgress.total) * 100)) : 0}%` }"
+          />
+        </div>
+      </div>
+
+      <div v-else class="text-sm text-gray-500">正在初始化同步任务...</div>
+    </div>
+
     <!-- Header Actions -->
     <Teleport v-if="teleportReady" to="#header-actions">
       <div class="flex items-center gap-2">

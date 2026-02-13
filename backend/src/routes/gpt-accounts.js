@@ -11,6 +11,102 @@ import { withLocks } from '../utils/locks.js'
 
 const router = express.Router()
 const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
+const SYNC_ALL_TASK_TTL_MS = 30 * 60 * 1000
+const syncAllTaskStore = new Map()
+
+const generateSyncAllTaskId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+
+const cleanupExpiredSyncAllTasks = () => {
+  const now = Date.now()
+  for (const [taskId, task] of syncAllTaskStore.entries()) {
+    const finishedAt = task?.finishedAt ? Date.parse(task.finishedAt) : null
+    if (finishedAt && Number.isFinite(finishedAt) && now - finishedAt > SYNC_ALL_TASK_TTL_MS) {
+      syncAllTaskStore.delete(taskId)
+    }
+  }
+}
+
+const createSyncAllTaskSnapshot = (task) => ({
+  taskId: task.taskId,
+  status: task.status,
+  total: task.total,
+  completed: task.completed,
+  successCount: task.successCount,
+  failedCount: task.failedCount,
+  results: task.results,
+  startedAt: task.startedAt,
+  finishedAt: task.finishedAt
+})
+
+const startSyncAllTask = async ({ ids, db }) => {
+  const taskId = generateSyncAllTaskId()
+  const task = {
+    taskId,
+    status: 'running',
+    total: ids.length,
+    completed: 0,
+    successCount: 0,
+    failedCount: 0,
+    results: [],
+    startedAt: new Date().toISOString(),
+    finishedAt: null
+  }
+  syncAllTaskStore.set(taskId, task)
+
+  ;(async () => {
+    try {
+      for (const accountId of ids) {
+        try {
+          const userSync = await syncAccountUserCount(accountId)
+          const inviteSync = await syncAccountInviteCount(accountId, {
+            accountRecord: userSync.account,
+            inviteListParams: { offset: 0, limit: 1, query: '' }
+          })
+          await markAccountSpaceStatus(db, accountId, { code: 'normal', reason: '正常' })
+          task.successCount += 1
+          task.results.push({
+            id: accountId,
+            ok: true,
+            account: {
+              ...inviteSync.account,
+              spaceStatusCode: 'normal',
+              spaceStatusReason: '正常',
+              spaceStatus: resolveSpaceStatus({ ...inviteSync.account, spaceStatusCode: 'normal', spaceStatusReason: '正常' })
+            },
+            syncedUserCount: userSync.syncedUserCount,
+            inviteCount: inviteSync.inviteCount
+          })
+        } catch (error) {
+          if (isTokenInvalidSyncError(error)) {
+            await markAccountSpaceStatus(db, accountId, { code: 'abnormal', reason: 'Token 已过期或无效，请更新账号 token' })
+          }
+          if (isWorkspaceExpiredSyncError(error)) {
+            await markAccountSpaceStatus(db, accountId, { code: 'abnormal', reason: getWorkspaceExpiredReason() })
+          }
+          task.failedCount += 1
+          task.results.push({ id: accountId, ok: false, error: error?.message || '同步失败', code: error?.code || null })
+        } finally {
+          task.completed += 1
+        }
+      }
+      task.status = 'completed'
+      task.finishedAt = new Date().toISOString()
+    } catch (error) {
+      task.status = 'failed'
+      task.finishedAt = new Date().toISOString()
+      task.results.push({
+        id: null,
+        ok: false,
+        error: error?.message || '批量同步执行失败',
+        code: error?.code || null
+      })
+      task.failedCount += 1
+      console.error('批量同步后台任务失败:', error)
+    }
+  })()
+
+  return task
+}
 
 const normalizeEmail = (value) => String(value ?? '').trim().toLowerCase()
 
@@ -1023,47 +1119,35 @@ router.patch('/reorder', async (req, res) => {
 // 一键同步全部空间信息
 router.post('/sync-all', async (req, res) => {
   try {
+    cleanupExpiredSyncAllTasks()
     const db = await getDatabase()
     const rows = db.exec(`SELECT id FROM gpt_accounts ORDER BY COALESCE(sort_order, id) ASC, created_at DESC`)
     const ids = (rows[0]?.values || []).map(row => Number(row[0])).filter(Number.isFinite)
-
-    const results = []
-    for (const accountId of ids) {
-      try {
-        const userSync = await syncAccountUserCount(accountId)
-        const inviteSync = await syncAccountInviteCount(accountId, {
-          accountRecord: userSync.account,
-          inviteListParams: { offset: 0, limit: 1, query: '' }
-        })
-        await markAccountSpaceStatus(db, accountId, { code: 'normal', reason: '正常' })
-        results.push({
-          id: accountId,
-          ok: true,
-          account: {
-            ...inviteSync.account,
-            spaceStatusCode: 'normal',
-            spaceStatusReason: '正常',
-            spaceStatus: resolveSpaceStatus({ ...inviteSync.account, spaceStatusCode: 'normal', spaceStatusReason: '正常' })
-          },
-          syncedUserCount: userSync.syncedUserCount,
-          inviteCount: inviteSync.inviteCount
-        })
-      } catch (error) {
-        if (isTokenInvalidSyncError(error)) {
-          await markAccountSpaceStatus(db, accountId, { code: 'abnormal', reason: 'Token 已过期或无效，请更新账号 token' })
-        }
-        if (isWorkspaceExpiredSyncError(error)) {
-          await markAccountSpaceStatus(db, accountId, { code: 'abnormal', reason: getWorkspaceExpiredReason() })
-        }
-        results.push({ id: accountId, ok: false, error: error?.message || '同步失败', code: error?.code || null })
-      }
-    }
-
-    return res.json({ message: '批量同步完成', total: ids.length, results })
+    const task = await startSyncAllTask({ ids, db })
+    return res.status(202).json({
+      message: '批量同步任务已启动',
+      ...createSyncAllTaskSnapshot(task)
+    })
   } catch (error) {
     console.error('批量同步失败:', error)
     return res.status(500).json({ error: '内部服务器错误' })
   }
+})
+
+router.get('/sync-all/:taskId', async (req, res) => {
+  cleanupExpiredSyncAllTasks()
+  const taskId = String(req.params.taskId || '').trim()
+  if (!taskId) {
+    return res.status(400).json({ error: '任务ID不能为空' })
+  }
+  const task = syncAllTaskStore.get(taskId)
+  if (!task) {
+    return res.status(404).json({ error: '任务不存在或已过期' })
+  }
+  return res.json({
+    message: task.status === 'completed' ? '批量同步完成' : '批量同步进行中',
+    ...createSyncAllTaskSnapshot(task)
+  })
 })
 
 // Delete a GPT account
