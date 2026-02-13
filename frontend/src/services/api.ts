@@ -347,14 +347,22 @@ export interface ChatgptAccountInvitesResponse {
 
 export interface SyncAllAccountsResponse {
   message: string
+  taskId: string
+  status: 'running' | 'completed' | 'failed'
   total: number
+  completed: number
+  successCount: number
+  failedCount: number
+  startedAt: string
+  finishedAt: string | null
   results: Array<{
-    id: number
+    id: number | null
     ok: boolean
     account?: GptAccount
     syncedUserCount?: number
     inviteCount?: number
     error?: string
+    code?: string | null
   }>
 }
 
@@ -1461,6 +1469,11 @@ export const gptAccountService = {
 
   async syncAll(): Promise<SyncAllAccountsResponse> {
     const response = await api.post('/gpt-accounts/sync-all')
+    return response.data
+  },
+
+  async getSyncAllProgress(taskId: string): Promise<SyncAllAccountsResponse> {
+    const response = await api.get(`/gpt-accounts/sync-all/${encodeURIComponent(taskId)}`)
     return response.data
   },
 
