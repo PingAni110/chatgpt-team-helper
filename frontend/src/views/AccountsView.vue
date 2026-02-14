@@ -29,7 +29,7 @@ import {
 } from '@/components/ui/dialog'
 import { useToast } from '@/components/ui/toast'
 import AppleNativeDateTimeInput from '@/components/ui/apple/NativeDateTimeInput.vue'
-import { Plus, Eye, EyeOff, RefreshCw, Ban, FilePenLine, Trash2, AlertTriangle, X, FolderOpen, Search, CheckCircle2, AlertCircle, ArrowUp, ArrowDown, Users } from 'lucide-vue-next'
+import { Plus, Eye, EyeOff, RefreshCw, Ban, FilePenLine, Trash2, AlertTriangle, X, FolderOpen, Search, CheckCircle2, AlertCircle, ArrowUp, ArrowDown, Users, Wrench } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
@@ -54,6 +54,7 @@ const dateFormatOptions = computed(() => ({
 
 
 const syncingAllAccounts = ref(false)
+const rebuildingSortOrder = ref(false)
 const showSyncAllProgressPanel = ref(false)
 const syncAllProgress = ref<SyncAllAccountsResponse | null>(null)
 let syncAllPollingTimer: ReturnType<typeof setTimeout> | null = null
@@ -992,6 +993,25 @@ const handleMoveAccount = async (account: GptAccount, direction: 'up' | 'down') 
   }
 }
 
+
+const handleRebuildSortOrder = async () => {
+  if (rebuildingSortOrder.value) return
+  const confirmed = window.confirm('将按创建时间重建全量账号排序，是否继续？')
+  if (!confirmed) return
+
+  rebuildingSortOrder.value = true
+  try {
+    const result = await gptAccountService.rebuildSortOrder()
+    showSuccessToast(result?.message || '排序已重建')
+    paginationMeta.value.page = 1
+    await loadAccounts()
+  } catch (err: any) {
+    showErrorToast(err?.response?.data?.error || '重建排序失败')
+  } finally {
+    rebuildingSortOrder.value = false
+  }
+}
+
 const handleSyncAllSpaces = async () => {
   if (syncingAllAccounts.value) return
 
@@ -1308,6 +1328,15 @@ const handleInviteSubmit = async () => {
       >
         <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': syncingAllAccounts }" />
         一键同步
+      </Button>
+      <Button
+        @click="handleRebuildSortOrder"
+        :disabled="rebuildingSortOrder"
+        variant="outline"
+        class="rounded-xl px-5 h-10"
+      >
+        <Wrench class="w-4 h-4 mr-2" :class="{ 'animate-spin': rebuildingSortOrder }" />
+        重建排序
       </Button>
       <Button
         @click="showDialog = true"

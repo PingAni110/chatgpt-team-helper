@@ -218,6 +218,39 @@ const isTokenInvalidSyncError = (error) => {
   return /token.*(过期|无效|invalid|expired)|unauthorized|invalid token/.test(message)
 }
 
+
+const hasDuplicateSortOrder = (db) => {
+  try {
+    const result = db.exec(`
+      SELECT sort_order, COUNT(*) AS count
+      FROM gpt_accounts
+      WHERE sort_order IS NOT NULL
+      GROUP BY sort_order
+      HAVING COUNT(*) > 1
+      LIMIT 1
+    `)
+    return Boolean(result[0]?.values?.length)
+  } catch {
+    return false
+  }
+}
+
+const rebuildSortOrderByCreatedDesc = (db) => {
+  const rows = db.exec(`
+    SELECT id
+    FROM gpt_accounts
+    ORDER BY created_at DESC, id DESC
+  `)
+  const ids = (rows[0]?.values || []).map((row) => Number(row[0])).filter(Number.isFinite)
+  ids.forEach((id, index) => {
+    db.run(
+      `UPDATE gpt_accounts SET sort_order = ?, updated_at = DATETIME('now', 'localtime') WHERE id = ?`,
+      [index + 1, id]
+    )
+  })
+  if (ids.length) saveDatabase()
+}
+
 const markAccountSpaceStatus = async (db, accountId, { code, reason = '' } = {}) => {
   const normalizedInputCode = String(code || '').trim().toLowerCase()
   const normalizedCode = ['normal', 'abnormal', 'unknown'].includes(normalizedInputCode) ? normalizedInputCode : 'unknown'
@@ -410,6 +443,12 @@ router.post('/check-token', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const db = await getDatabase()
+    // 历史版本曾写入重复 sort_order，会导致列表“看起来乱序”。
+    // 读取列表前自动修复一次，避免用户持续看到错乱结果。
+    if (hasDuplicateSortOrder(db)) {
+      rebuildSortOrderByCreatedDesc(db)
+    }
+
     const page = Math.max(1, Number(req.query.page) || 1)
     const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 10))
     const search = (req.query.search || '').trim().toLowerCase()
@@ -1095,6 +1134,10 @@ router.patch('/reorder', async (req, res) => {
     if (!ids.length) return res.status(400).json({ error: 'ids is required' })
 
     const db = await getDatabase()
+    if (hasDuplicateSortOrder(db)) {
+      rebuildSortOrderByCreatedDesc(db)
+    }
+
     const placeholders = ids.map(() => '?').join(',')
     const existing = db.exec(`SELECT id FROM gpt_accounts WHERE id IN (${placeholders})`, ids)
     const existingSet = new Set((existing[0]?.values || []).map(row => Number(row[0])))
@@ -1137,6 +1180,19 @@ router.patch('/reorder', async (req, res) => {
     return res.json({ message: '排序更新成功' })
   } catch (error) {
     console.error('更新账号排序失败:', error)
+    return res.status(500).json({ error: '内部服务器错误' })
+  }
+})
+
+
+// 一键重建排序（管理端手动兜底）
+router.post('/rebuild-sort-order', async (req, res) => {
+  try {
+    const db = await getDatabase()
+    rebuildSortOrderByCreatedDesc(db)
+    return res.json({ message: '排序已按创建时间重建' })
+  } catch (error) {
+    console.error('重建账号排序失败:', error)
     return res.status(500).json({ error: '内部服务器错误' })
   }
 })
