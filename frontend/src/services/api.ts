@@ -1482,6 +1482,11 @@ export const gptAccountService = {
     return response.data
   },
 
+  async rebuildSortOrder(): Promise<{ message: string }> {
+    const response = await api.post('/gpt-accounts/rebuild-sort-order')
+    return response.data
+  },
+
   async deleteAccountUser(accountId: number, userId: string): Promise<SyncUserCountResponse> {
     const response = await api.delete(`/gpt-accounts/${accountId}/users/${encodeURIComponent(userId)}`)
     return response.data
