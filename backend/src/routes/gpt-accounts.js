@@ -477,7 +477,7 @@ router.get('/', async (req, res) => {
                created_at, updated_at
         FROM gpt_accounts
         ${whereClause}
-        ORDER BY COALESCE(sort_order, id) ASC, created_at DESC
+        ORDER BY COALESCE(sort_order, id) ASC, created_at DESC, id ASC
         LIMIT ? OFFSET ?
       `, [...params, pageSize, offset])
     } catch (error) {
@@ -490,7 +490,7 @@ router.get('/', async (req, res) => {
                created_at, updated_at
         FROM gpt_accounts
         ${whereClause}
-        ORDER BY COALESCE(sort_order, id) ASC, created_at DESC
+        ORDER BY COALESCE(sort_order, id) ASC, created_at DESC, id ASC
         LIMIT ? OFFSET ?
       `, [...params, pageSize, offset])
     }
@@ -1102,7 +1102,32 @@ router.patch('/reorder', async (req, res) => {
       if (!existingSet.has(id)) return res.status(400).json({ error: `账号不存在: ${id}` })
     }
 
+    // 说明：前端当前仅提交“当前页可见账号”的顺序。
+    // 如果直接写入 1..N，会导致全表 sort_order 冲突，列表出现跨页乱序。
+    // 这里改为：基于全量顺序，仅替换本次提交 ID 所在位置的相对顺序，再统一重排为唯一 sort_order。
+    const allRows = db.exec(`
+      SELECT id
+      FROM gpt_accounts
+      ORDER BY COALESCE(sort_order, id) ASC, created_at DESC, id ASC
+    `)
+    const orderedIds = (allRows[0]?.values || []).map(row => Number(row[0])).filter(Number.isFinite)
+    if (!orderedIds.length) {
+      return res.status(400).json({ error: '暂无可排序账号' })
+    }
+
+    const idToPosition = new Map(orderedIds.map((id, index) => [id, index]))
+    const targetPositions = ids.map((id) => idToPosition.get(id)).filter(Number.isFinite).sort((a, b) => a - b)
+
+    if (targetPositions.length !== ids.length) {
+      return res.status(400).json({ error: '排序目标不完整，请刷新后重试' })
+    }
+
     ids.forEach((id, index) => {
+      const position = targetPositions[index]
+      orderedIds[position] = id
+    })
+
+    orderedIds.forEach((id, index) => {
       db.run(
         `UPDATE gpt_accounts SET sort_order = ?, updated_at = DATETIME('now', 'localtime') WHERE id = ?`,
         [index + 1, id]
@@ -1121,7 +1146,7 @@ router.post('/sync-all', async (req, res) => {
   try {
     cleanupExpiredSyncAllTasks()
     const db = await getDatabase()
-    const rows = db.exec(`SELECT id FROM gpt_accounts ORDER BY COALESCE(sort_order, id) ASC, created_at DESC`)
+    const rows = db.exec(`SELECT id FROM gpt_accounts ORDER BY COALESCE(sort_order, id) ASC, created_at DESC, id ASC`)
     const ids = (rows[0]?.values || []).map(row => Number(row[0])).filter(Number.isFinite)
     const task = await startSyncAllTask({ ids, db })
     return res.status(202).json({
