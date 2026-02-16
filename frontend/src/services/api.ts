@@ -1405,6 +1405,55 @@ export const accountRecoveryAdminService = {
   },
 }
 
+
+export type HistoryExceptionStatus = 'active' | 'resolved' | 'ignored'
+
+export interface HistoryExceptionItem {
+  accountId: number
+  accountName: string
+  exceptionType: string
+  exceptionCode: string
+  exceptionMessage: string
+  source: string
+  firstSeenAt: string | null
+  lastSeenAt: string | null
+  status: HistoryExceptionStatus
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export interface HistoryExceptionListParams {
+  page?: number
+  pageSize?: number
+  keyword?: string
+  exceptionType?: string
+  status?: HistoryExceptionStatus
+  startTime?: string
+  endTime?: string
+}
+
+export interface HistoryExceptionListResponse {
+  items: HistoryExceptionItem[]
+  pagination: {
+    page: number
+    pageSize: number
+    total: number
+    totalPages: number
+  }
+}
+
+export const historyExceptionService = {
+  async list(params?: HistoryExceptionListParams): Promise<HistoryExceptionListResponse> {
+    const response = await api.get('/admin/history-exceptions', { params })
+    return response.data
+  },
+
+  async updateStatus(accountId: number, status: HistoryExceptionStatus): Promise<{ accountId: number; status: HistoryExceptionStatus }> {
+    const response = await api.put(`/admin/history-exceptions/${accountId}/status`, { status })
+    return response.data
+  },
+}
+
 export const configService = {
   async getRuntimeConfig(): Promise<AppRuntimeConfig> {
     const response = await api.get('/config/runtime')

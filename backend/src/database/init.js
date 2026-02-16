@@ -301,6 +301,9 @@ const ensureRbacTables = (database) => {
       { key: 'settings', label: '系统设置', path: '/admin/settings', sortOrder: 9 },
       { key: 'my_orders', label: '我的订单', path: '/admin/my-orders', sortOrder: 10 },
       { key: 'points_exchange', label: '积分兑换', path: '/admin/points-exchange', sortOrder: 11 },
+      { key: 'history_exceptions', label: '历史异常', path: '/admin/history-exceptions', sortOrder: 12 },
+      { key: 'history_exception:view', label: '历史异常查看权限', path: '', sortOrder: 9001, isActive: 0 },
+      { key: 'history_exception:update', label: '历史异常更新权限', path: '', sortOrder: 9002, isActive: 0 },
       { key: 'waiting_room', label: '候车室管理', path: '/admin/waiting-room', sortOrder: 99, isActive: 0 },
     ]
 
@@ -436,6 +439,25 @@ const ensureRbacTables = (database) => {
       }
 
       grantRoleMenus(superAdminRoleId, menuIds)
+    }
+
+    // 角色授权迁移：历史具备“补号管理”的角色，自动补齐历史异常菜单和权限点
+    try {
+      const sourceMenuId = resolveMenuIdByKey('account_recovery')
+      const migrationTargets = ['history_exceptions', 'history_exception:view', 'history_exception:update']
+        .map(resolveMenuIdByKey)
+        .filter(Boolean)
+
+      if (sourceMenuId && migrationTargets.length) {
+        const roleRows = database.exec('SELECT role_id FROM role_menus WHERE menu_id = ?', [sourceMenuId])
+        for (const row of roleRows[0]?.values || []) {
+          const roleId = Number(row[0])
+          if (!Number.isFinite(roleId) || roleId <= 0) continue
+          grantRoleMenus(roleId, migrationTargets)
+        }
+      }
+    } catch (error) {
+      console.warn('[RBAC] 历史异常权限迁移失败:', error?.message || error)
     }
 
     const defaultUserMenuKeys = ['my_orders', 'user_info', 'points_exchange']
@@ -1476,6 +1498,63 @@ const ensureCreditOrdersTable = (database) => {
   return changed
 }
 
+const ensureAccountExceptionHistoryTable = (database) => {
+  if (!database) return false
+  let changed = false
+
+  const tableExistsResult = database.exec('SELECT name FROM sqlite_master WHERE type="table" AND name="account_exception_history"')
+  if (tableExistsResult.length === 0) {
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS account_exception_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          account_id INTEGER NOT NULL,
+          account_name TEXT,
+          exception_type TEXT NOT NULL,
+          exception_code TEXT,
+          exception_message TEXT,
+          source TEXT,
+          first_seen_at DATETIME DEFAULT (DATETIME('now', 'localtime')),
+          last_seen_at DATETIME DEFAULT (DATETIME('now', 'localtime')),
+          status TEXT DEFAULT 'active',
+          created_at DATETIME DEFAULT (DATETIME('now', 'localtime')),
+          updated_at DATETIME DEFAULT (DATETIME('now', 'localtime')),
+          UNIQUE(account_id)
+        )
+      `)
+      changed = true
+    } catch (error) {
+      console.warn('[DB] 无法创建 account_exception_history 表:', error)
+    }
+  }
+
+  const parseFailuresTableExists = database.exec('SELECT name FROM sqlite_master WHERE type="table" AND name="account_exception_parse_failures"')
+  if (parseFailuresTableExists.length === 0) {
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS account_exception_parse_failures (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          source TEXT,
+          reason TEXT,
+          raw_payload TEXT,
+          created_at DATETIME DEFAULT (DATETIME('now', 'localtime'))
+        )
+      `)
+      changed = true
+    } catch (error) {
+      console.warn('[DB] 无法创建 account_exception_parse_failures 表:', error)
+    }
+  }
+
+  database.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_account_exception_history_account_id ON account_exception_history (account_id)')
+  database.run('CREATE INDEX IF NOT EXISTS idx_account_exception_history_last_seen ON account_exception_history (last_seen_at DESC)')
+  database.run('CREATE INDEX IF NOT EXISTS idx_account_exception_history_type ON account_exception_history (exception_type)')
+  database.run('CREATE INDEX IF NOT EXISTS idx_account_exception_history_status ON account_exception_history (status)')
+  database.run('CREATE INDEX IF NOT EXISTS idx_account_exception_parse_failures_created_at ON account_exception_parse_failures (created_at DESC)')
+
+  return changed
+}
+
 // 获取数据库路径（优先使用环境变量，否则使用默认路径）
 function getDatabasePath() {
   if (process.env.DATABASE_PATH) {
@@ -1549,8 +1628,9 @@ export async function initDatabase() {
         const creditOrdersCreated = ensureCreditOrdersTable(database)
         const pointsWithdrawalsCreated = ensurePointsWithdrawalsTable(database)
         const pointsLedgerCreated = ensurePointsLedgerTable(database)
+        const accountExceptionHistoryCreated = ensureAccountExceptionHistoryTable(database)
         const rbacInitialized = ensureRbacTables(database)
-        if (waitingRoomCreated || xhsTablesCreated || xianyuTablesCreated || linuxDoUsersCreated || accountRecoveryCreated || purchaseOrdersCreated || creditOrdersCreated || pointsWithdrawalsCreated || pointsLedgerCreated || rbacInitialized) {
+        if (waitingRoomCreated || xhsTablesCreated || xianyuTablesCreated || linuxDoUsersCreated || accountRecoveryCreated || purchaseOrdersCreated || creditOrdersCreated || pointsWithdrawalsCreated || pointsLedgerCreated || accountExceptionHistoryCreated || rbacInitialized) {
           saveDatabase()
         }
 
@@ -1815,7 +1895,8 @@ export async function initDatabase() {
   const creditOrdersInitialized = ensureCreditOrdersTable(database)
   const pointsWithdrawalsInitialized = ensurePointsWithdrawalsTable(database)
   const pointsLedgerInitialized = ensurePointsLedgerTable(database)
-  if (waitingRoomInitialized || xhsTablesInitialized || xianyuTablesInitialized || linuxDoUsersInitialized || accountRecoveryInitialized || purchaseOrdersInitialized || creditOrdersInitialized || pointsWithdrawalsInitialized || pointsLedgerInitialized) {
+  const accountExceptionHistoryInitialized = ensureAccountExceptionHistoryTable(database)
+  if (waitingRoomInitialized || xhsTablesInitialized || xianyuTablesInitialized || linuxDoUsersInitialized || accountRecoveryInitialized || purchaseOrdersInitialized || creditOrdersInitialized || pointsWithdrawalsInitialized || pointsLedgerInitialized || accountExceptionHistoryInitialized) {
     saveDatabase()
   }
 

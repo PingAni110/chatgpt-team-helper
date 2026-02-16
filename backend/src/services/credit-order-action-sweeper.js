@@ -9,6 +9,7 @@ import {
 } from './account-sync.js'
 import { redeemOpenAccountsOrderCode } from './open-accounts-redemption.js'
 import { sendAdminAlertEmail } from './email-service.js'
+import { upsertAccountExceptionHistory } from './account-exception-history.js'
 import { getFeatureFlags, isFeatureEnabled } from '../utils/feature-flags.js'
 
 const LABEL = '[CreditOrderActionSweeper]'
@@ -47,6 +48,35 @@ const safeJsonParse = (raw) => {
 }
 
 const nowIso = () => new Date().toISOString()
+
+
+const recordHistoryExceptionFromOrder = async ({
+  accountId,
+  accountName,
+  exceptionType,
+  exceptionCode,
+  exceptionMessage,
+  status = 'active',
+  source = 'credit_order_action_sweeper',
+}) => {
+  const result = await upsertAccountExceptionHistory({
+    accountId,
+    accountName,
+    exceptionType,
+    exceptionCode,
+    exceptionMessage,
+    status,
+    source,
+  })
+  if (!result?.ok) {
+    console.warn(`${LABEL} history exception upsert skipped`, {
+      accountId,
+      reason: result?.reason || 'unknown',
+      exceptionType,
+      exceptionCode,
+    })
+  }
+}
 
 const computeNextRetryAt = (attempt) => {
   const safeAttempt = Math.max(1, Number(attempt) || 1)
@@ -253,6 +283,12 @@ const fulfillOpenAccountsBoardOrder = async (db, row) => {
     if (!alertResult.ok) {
       console.warn(`${LABEL} admin alert skipped`, { orderNo, uid, targetAccountId, reason: alertResult.error || 'unknown' })
     }
+    await recordHistoryExceptionFromOrder({
+      accountId: targetAccountId,
+      exceptionType: 'missing_order_email',
+      exceptionCode: 'ORDER_EMAIL_MISSING',
+      exceptionMessage: message,
+    })
     return { ok: false, error: message, retryable: false }
   }
 
@@ -268,6 +304,12 @@ const fulfillOpenAccountsBoardOrder = async (db, row) => {
     if (!alertResult.ok) {
       console.warn(`${LABEL} admin alert skipped`, { orderNo, uid, targetAccountId, reason: alertResult.error || 'unknown' })
     }
+    await recordHistoryExceptionFromOrder({
+      accountId: targetAccountId,
+      exceptionType: 'open_account_not_found',
+      exceptionCode: 'ACCOUNT_NOT_FOUND',
+      exceptionMessage: message,
+    })
     return { ok: false, error: message, retryable: false }
   }
 
@@ -289,6 +331,12 @@ const fulfillOpenAccountsBoardOrder = async (db, row) => {
     if (!alertResult.ok) {
       console.warn(`${LABEL} admin alert skipped`, { orderNo, uid, targetAccountId, reason: alertResult.error || 'unknown' })
     }
+    await recordHistoryExceptionFromOrder({
+      accountId: targetAccountId,
+      exceptionType: 'invalid_target_account',
+      exceptionCode: 'ACCOUNT_EMAIL_MISSING',
+      exceptionMessage: message,
+    })
     return { ok: false, error: message, retryable: false }
   }
 
@@ -408,6 +456,12 @@ const fulfillOpenAccountsBoardOrder = async (db, row) => {
       if (!alertResult.ok) {
         console.warn(`${LABEL} admin alert skipped`, { orderNo, uid, targetAccountId, reason: alertResult.error || 'unknown' })
       }
+      await recordHistoryExceptionFromOrder({
+        accountId: targetAccountId,
+        exceptionType: retryable ? 'invite_retry_exhausted' : 'invite_failed',
+        exceptionCode: retryable ? 'RETRY_EXHAUSTED' : 'INVITE_FAILED',
+        exceptionMessage: message,
+      })
     }
 
     console.error(LABEL, 'action failed', { orderNo, uid, targetAccountId, attempt: nextAttempt, retryable, message })

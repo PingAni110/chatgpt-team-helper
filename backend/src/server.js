@@ -18,6 +18,7 @@ import purchaseRoutes from './routes/purchase.js'
 import creditRoutes from './routes/credit.js'
 import adminRoutes from './routes/admin.js'
 import adminStatsRoutes from './routes/admin-stats.js'
+import adminHistoryExceptionsRoutes from './routes/admin-history-exceptions.js'
 import { initDatabase } from './database/init.js'
 import { startWaitingRoomAutoBoardingScheduler } from './services/waiting-room-auto-boarding.js'
 import { startOpenAccountsOvercapacitySweeper } from './services/open-accounts-sweeper.js'
@@ -140,6 +141,7 @@ app.use('/api/open-accounts', openAccountsRoutes)
 app.use('/api/purchase', purchaseRoutes)
 app.use('/api/credit', creditRoutes)
 app.use('/api/admin/stats', adminStatsRoutes)
+app.use('/api/admin', adminHistoryExceptionsRoutes)
 app.use('/api/admin', adminRoutes)
 // ZPAY 的异步回调示例为 /notify?...，这里提供无 /api 前缀的兼容入口
 app.all('/notify', purchaseRoutes)
