@@ -321,6 +321,8 @@ export interface ChatgptAccountUser {
   name?: string
   created_time?: string
   is_scim_managed?: boolean
+  isProtected?: boolean
+  emailDisplay?: string
 }
 
 export interface ChatgptAccountUsersResponse {

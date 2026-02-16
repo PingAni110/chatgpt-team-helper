@@ -704,6 +704,60 @@ const ensureWaitingRoomTable = (database) => {
   return changed || cooldownTableChanged
 }
 
+const ensureOpenAccountSeatProtectionsTable = (database) => {
+  if (!database) return false
+  let changed = false
+
+  const tableInfo = database.exec('SELECT name FROM sqlite_master WHERE type="table" AND name="open_account_seat_protections"')
+  if (tableInfo.length === 0) {
+    database.run(`
+      CREATE TABLE IF NOT EXISTS open_account_seat_protections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        target_email TEXT NOT NULL,
+        source_channel TEXT NOT NULL,
+        created_at DATETIME DEFAULT (DATETIME('now', 'localtime')),
+        expires_at DATETIME,
+        updated_at DATETIME DEFAULT (DATETIME('now', 'localtime'))
+      )
+    `)
+    changed = true
+  }
+
+  database.run('CREATE INDEX IF NOT EXISTS idx_open_account_seat_protections_email ON open_account_seat_protections (target_email)')
+  database.run('CREATE INDEX IF NOT EXISTS idx_open_account_seat_protections_source ON open_account_seat_protections (source_channel)')
+  database.run('CREATE INDEX IF NOT EXISTS idx_open_account_seat_protections_expires ON open_account_seat_protections (expires_at)')
+
+  try {
+    const columnsResult = database.exec('PRAGMA table_info(open_account_seat_protections)')
+    const columns = new Set((columnsResult[0]?.values || []).map(row => String(row[1] || '')))
+
+    if (!columns.has('target_email')) {
+      database.run('ALTER TABLE open_account_seat_protections ADD COLUMN target_email TEXT')
+      changed = true
+    }
+    if (!columns.has('source_channel')) {
+      database.run('ALTER TABLE open_account_seat_protections ADD COLUMN source_channel TEXT')
+      changed = true
+    }
+    if (!columns.has('created_at')) {
+      database.run("ALTER TABLE open_account_seat_protections ADD COLUMN created_at DATETIME DEFAULT (DATETIME('now', 'localtime'))")
+      changed = true
+    }
+    if (!columns.has('expires_at')) {
+      database.run('ALTER TABLE open_account_seat_protections ADD COLUMN expires_at DATETIME')
+      changed = true
+    }
+    if (!columns.has('updated_at')) {
+      database.run("ALTER TABLE open_account_seat_protections ADD COLUMN updated_at DATETIME DEFAULT (DATETIME('now', 'localtime'))")
+      changed = true
+    }
+  } catch (error) {
+    console.warn('[DB] 无法检查保护席位表字段:', error)
+  }
+
+  return changed
+}
+
 const ensureXhsTables = (database) => {
   if (!database) return false
   let changed = false
@@ -1620,6 +1674,7 @@ export async function initDatabase() {
         console.log('数据库已存在且表结构完整，跳过初始化')
 
         const waitingRoomCreated = ensureWaitingRoomTable(database)
+        const openAccountSeatProtectionsCreated = ensureOpenAccountSeatProtectionsTable(database)
         const xhsTablesCreated = ensureXhsTables(database)
         const xianyuTablesCreated = ensureXianyuTables(database)
         const linuxDoUsersCreated = ensureLinuxDoUsersTable(database)
@@ -1630,7 +1685,7 @@ export async function initDatabase() {
         const pointsLedgerCreated = ensurePointsLedgerTable(database)
         const accountExceptionHistoryCreated = ensureAccountExceptionHistoryTable(database)
         const rbacInitialized = ensureRbacTables(database)
-        if (waitingRoomCreated || xhsTablesCreated || xianyuTablesCreated || linuxDoUsersCreated || accountRecoveryCreated || purchaseOrdersCreated || creditOrdersCreated || pointsWithdrawalsCreated || pointsLedgerCreated || accountExceptionHistoryCreated || rbacInitialized) {
+        if (waitingRoomCreated || openAccountSeatProtectionsCreated || xhsTablesCreated || xianyuTablesCreated || linuxDoUsersCreated || accountRecoveryCreated || purchaseOrdersCreated || creditOrdersCreated || pointsWithdrawalsCreated || pointsLedgerCreated || accountExceptionHistoryCreated || rbacInitialized) {
           saveDatabase()
         }
 
@@ -1887,6 +1942,7 @@ export async function initDatabase() {
   `)
 
   const waitingRoomInitialized = ensureWaitingRoomTable(database)
+  const openAccountSeatProtectionsInitialized = ensureOpenAccountSeatProtectionsTable(database)
   const xhsTablesInitialized = ensureXhsTables(database)
   const xianyuTablesInitialized = ensureXianyuTables(database)
   const linuxDoUsersInitialized = ensureLinuxDoUsersTable(database)
@@ -1896,7 +1952,7 @@ export async function initDatabase() {
   const pointsWithdrawalsInitialized = ensurePointsWithdrawalsTable(database)
   const pointsLedgerInitialized = ensurePointsLedgerTable(database)
   const accountExceptionHistoryInitialized = ensureAccountExceptionHistoryTable(database)
-  if (waitingRoomInitialized || xhsTablesInitialized || xianyuTablesInitialized || linuxDoUsersInitialized || accountRecoveryInitialized || purchaseOrdersInitialized || creditOrdersInitialized || pointsWithdrawalsInitialized || pointsLedgerInitialized || accountExceptionHistoryInitialized) {
+  if (waitingRoomInitialized || openAccountSeatProtectionsInitialized || xhsTablesInitialized || xianyuTablesInitialized || linuxDoUsersInitialized || accountRecoveryInitialized || purchaseOrdersInitialized || creditOrdersInitialized || pointsWithdrawalsInitialized || pointsLedgerInitialized || accountExceptionHistoryInitialized) {
     saveDatabase()
   }
 
