@@ -53,6 +53,7 @@ const ICONS_BY_MENU_KEY: Record<string, any> = {
   purchase_orders: CreditCard,
   product_management: CreditCard,
   product_management_list: CreditCard,
+  product_management_site_notice: CreditCard,
   credit_orders: Coins,
   order_management: ShoppingCart,
   waiting_room: Train,
@@ -73,6 +74,7 @@ const FALLBACK_ADMIN_MENU_TREE: AdminMenuDraftNode[] = [
     label: '商品管理',
     children: [
       { key: 'product_management_list', path: '/admin/product-management/list', label: '商品列表' },
+      { key: 'product_management_site_notice', path: '/admin/product-management/site-notice', label: '公告设置' },
     ],
   },
   {
@@ -166,6 +168,7 @@ export const filterAdminMenuTreeByFeatureFlags = (tree: AdminMenuNode[], feature
     purchase_orders: 'payment',
     product_management: 'payment',
     product_management_list: 'payment',
+    product_management_site_notice: 'payment',
     credit_orders: 'openAccounts'
   }
 
