@@ -131,6 +131,51 @@ const getProtectedSeatEmailSet = async (database) => {
   )
 }
 
+
+const upsertSystemInviteProtection = async (database, email) => {
+  if (!database) return
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return
+
+  const existing = database.exec(
+    `
+      SELECT id
+      FROM open_account_seat_protections
+      WHERE lower(target_email) = ?
+        AND source_channel = 'system_invite'
+      LIMIT 1
+    `,
+    [normalizedEmail]
+  )
+
+  if (existing[0]?.values?.length) {
+    const protectionId = Number(existing[0].values[0][0])
+    database.run(
+      `
+        UPDATE open_account_seat_protections
+        SET expires_at = NULL,
+            updated_at = DATETIME('now', 'localtime')
+        WHERE id = ?
+      `,
+      [protectionId]
+    )
+    return
+  }
+
+  database.run(
+    `
+      INSERT INTO open_account_seat_protections (
+        target_email,
+        source_channel,
+        created_at,
+        updated_at
+      )
+      VALUES (?, 'system_invite', DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))
+    `,
+    [normalizedEmail]
+  )
+}
+
 const appendProtectedMemberSuffix = (usersResponse, protectedEmailSet) => {
   if (!usersResponse || !Array.isArray(usersResponse.items)) return usersResponse
 
@@ -1365,7 +1410,13 @@ router.post('/:id/invite-user', async (req, res) => {
     if (!email) {
       return res.status(400).json({ error: '请提供邀请邮箱地址' })
     }
-    const result = await inviteAccountUser(Number(req.params.id), email)
+    const normalizedInviteEmail = normalizeEmail(email)
+    const result = await inviteAccountUser(Number(req.params.id), normalizedInviteEmail)
+
+    const db = await getDatabase()
+    await upsertSystemInviteProtection(db, normalizedInviteEmail)
+    saveDatabase()
+
     let inviteCount = null
     try {
       const synced = await syncAccountInviteCount(Number(req.params.id), {
