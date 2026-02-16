@@ -23,6 +23,7 @@ import XhsOrdersView from '../views/XhsOrdersView.vue'
 import XianyuOrdersView from '../views/XianyuOrdersView.vue'
 import PurchaseOrdersView from '../views/PurchaseOrdersView.vue'
 import ProductManagementView from '../views/ProductManagementView.vue'
+import SiteNoticeSettingsView from '../views/SiteNoticeSettingsView.vue'
 import CreditOrdersView from '../views/CreditOrdersView.vue'
 import AccountRecoveryAdminView from '../views/AccountRecoveryAdminView.vue'
 import StatsView from '../views/StatsView.vue'
@@ -217,6 +218,12 @@ const router = createRouter({
           name: 'product-management-list',
           component: ProductManagementView,
           meta: { requiredMenuKey: 'product_management', featureKey: 'payment' },
+        },
+        {
+          path: 'product-management/site-notice',
+          name: 'product-management-site-notice',
+          component: SiteNoticeSettingsView,
+          meta: { requiredMenuKey: 'product_management_site_notice', featureKey: 'payment' },
         },
         {
           path: 'order-management/product-management',
