@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { authService } from '@/services/api'
+import { useAppConfigStore } from '@/stores/appConfig'
 import { ChevronDown } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -16,6 +17,8 @@ const props = defineProps({
 })
 
 const router = useRouter()
+const route = useRoute()
+const appConfigStore = useAppConfigStore()
 
 const currentUser = ref(authService.getCurrentUser())
 const syncCurrentUser = () => {
@@ -31,6 +34,22 @@ const displayName = computed(() => {
   return email
 })
 const avatarText = computed(() => (displayName.value.charAt(0) || 'U').toUpperCase())
+
+
+const isPurchaseRoute = computed(() => {
+  const path = String(route.path || '')
+  return path === '/buy' || path === '/order' || path.startsWith('/purchase')
+})
+
+const hasVisibleSiteNotice = computed(() => {
+  const notice = appConfigStore.siteNotice
+  return isPurchaseRoute.value && Boolean(notice?.enabled) && Boolean(String(notice?.text || '').trim())
+})
+
+const userStatusBarOffsetClass = computed(() => {
+  if (!hasVisibleSiteNotice.value) return 'top-4 sm:top-8'
+  return 'top-16 sm:top-20'
+})
 
 const isUserPopoverOpen = ref(false)
 const userButtonRef = ref<HTMLElement | null>(null)
@@ -78,7 +97,8 @@ watch(isAuthenticated, (value) => {
   <div class="min-h-screen w-full overflow-hidden relative flex items-start justify-center pt-12 sm:pt-24 pb-12 px-4 sm:px-6 lg:px-8">
     <div
       v-if="props.showUserStatusBar"
-      class="fixed top-4 right-4 sm:top-8 sm:right-12 z-30 flex items-start justify-end gap-3"
+      class="fixed right-4 sm:right-12 z-30 flex items-start justify-end gap-3 transition-all duration-200"
+      :class="userStatusBarOffsetClass"
     >
       <template v-if="isAuthenticated">
         <div class="flex flex-col items-end gap-3">

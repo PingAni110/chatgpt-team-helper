@@ -2,16 +2,19 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
 const noticeBar = await readFile(new URL('../src/components/SiteNoticeBar.vue', import.meta.url), 'utf8')
+const redeemShell = await readFile(new URL('../src/components/RedeemShell.vue', import.meta.url), 'utf8')
 const appConfigStore = await readFile(new URL('../src/stores/appConfig.ts', import.meta.url), 'utf8')
 const noticeUtil = await readFile(new URL('../src/lib/siteNotice.ts', import.meta.url), 'utf8')
 
 assert.ok(noticeBar.includes("path.value === '/buy' || path.value === '/order' || path.value.startsWith('/purchase')"), '公告条应仅在购买相关页面显示')
+assert.ok(noticeBar.includes('grid-cols-[1fr_auto_1fr]'), '公告条应使用三栏居中布局保证中间文案稳定居中')
 assert.ok(noticeBar.includes('DialogContent'), '公告详情应使用弹窗展示')
 assert.ok(noticeBar.includes('v-html="noticeHtml"'), '公告详情应展示完整富文本内容')
 assert.ok(noticeUtil.includes('**加粗**') || noticeUtil.includes('NOTICE_BOLD_PREFIX'), '公告富文本应支持加粗语法')
 assert.ok(noticeUtil.includes('[red]') && noticeUtil.includes('[/red]'), '公告富文本应支持标红语法')
 assert.ok(appConfigStore.includes('const siteNotice = ref<SiteNoticeState>'), '运行时配置应包含公告状态')
 assert.ok(appConfigStore.includes('if (config.siteNotice && typeof config.siteNotice === \'object\')'), '应在 applyConfig 中处理公告配置')
+assert.ok(redeemShell.includes('userStatusBarOffsetClass'), '购买页用户状态条应根据公告动态下移，避免重叠')
 
 console.log('site notice bar tests passed')
 
