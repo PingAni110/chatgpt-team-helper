@@ -433,7 +433,7 @@ export interface AccountRecoveryData {
 export interface SiteNoticeConfig {
   enabled: boolean
   text: string
-  link: string
+  link?: string
 }
 
 export interface AppRuntimeConfig {
