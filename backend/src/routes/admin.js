@@ -100,10 +100,25 @@ const ORDER_TYPE_WARRANTY = 'warranty'
 const ORDER_TYPE_NO_WARRANTY = 'no_warranty'
 const ORDER_TYPE_ANTI_BAN = 'anti_ban'
 const ORDER_TYPE_SET = new Set([ORDER_TYPE_WARRANTY, ORDER_TYPE_NO_WARRANTY, ORDER_TYPE_ANTI_BAN])
+const SITE_NOTICE_LINK_PROTOCOL_SET = new Set(['http:', 'https:'])
 
 const normalizeOrderType = (value) => {
   const normalized = String(value || '').trim().toLowerCase()
   return ORDER_TYPE_SET.has(normalized) ? normalized : ORDER_TYPE_WARRANTY
+}
+
+const normalizeSiteNoticeLink = (value) => {
+  const link = String(value ?? '').trim()
+  if (!link) return ''
+  try {
+    const parsed = new URL(link)
+    if (!SITE_NOTICE_LINK_PROTOCOL_SET.has(parsed.protocol)) {
+      return null
+    }
+    return parsed.toString()
+  } catch {
+    return null
+  }
 }
 
 const ACCOUNT_RECOVERY_WINDOW_DAYS = Math.max(1, toInt(process.env.ACCOUNT_RECOVERY_WINDOW_DAYS, 30))
@@ -353,6 +368,57 @@ router.put('/feature-flags', async (req, res) => {
     res.json({ features })
   } catch (error) {
     console.error('Update feature-flags error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+router.get('/site-notice-settings', async (req, res) => {
+  try {
+    const db = await getDatabase()
+    const enabledRaw = db.exec('SELECT config_value FROM system_config WHERE config_key = ? LIMIT 1', ['site_notice_enabled'])
+    const textRaw = db.exec('SELECT config_value FROM system_config WHERE config_key = ? LIMIT 1', ['site_notice_text'])
+    const linkRaw = db.exec('SELECT config_value FROM system_config WHERE config_key = ? LIMIT 1', ['site_notice_link'])
+    const enabled = String(enabledRaw[0]?.values?.[0]?.[0] ?? '').trim().toLowerCase()
+
+    res.json({
+      siteNotice: {
+        enabled: enabled === 'true' || enabled === '1' || enabled === 'yes' || enabled === 'on',
+        text: String(textRaw[0]?.values?.[0]?.[0] ?? ''),
+        link: String(linkRaw[0]?.values?.[0]?.[0] ?? '')
+      }
+    })
+  } catch (error) {
+    console.error('Get site-notice-settings error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+router.put('/site-notice-settings', async (req, res) => {
+  try {
+    const payload = req.body?.siteNotice && typeof req.body.siteNotice === 'object' ? req.body.siteNotice : (req.body || {})
+    const enabled = Boolean(payload?.enabled)
+    const text = String(payload?.text ?? '').trim()
+    const link = normalizeSiteNoticeLink(payload?.link)
+
+    if (link === null) {
+      return res.status(400).json({ error: '公告链接格式不正确，仅允许 http:// 或 https:// 链接' })
+    }
+
+    const db = await getDatabase()
+    upsertSystemConfigValue(db, 'site_notice_enabled', enabled ? 'true' : 'false')
+    upsertSystemConfigValue(db, 'site_notice_text', text)
+    upsertSystemConfigValue(db, 'site_notice_link', link)
+    saveDatabase()
+
+    res.json({
+      siteNotice: {
+        enabled,
+        text,
+        link
+      }
+    })
+  } catch (error) {
+    console.error('Update site-notice-settings error:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 })

@@ -93,6 +93,14 @@ const featureFlagsError = ref('')
 const featureFlagsSuccess = ref('')
 const featureFlagsLoading = ref(false)
 
+// 站点公告配置（仅超级管理员）
+const siteNoticeEnabled = ref(false)
+const siteNoticeText = ref('')
+const siteNoticeLink = ref('')
+const siteNoticeError = ref('')
+const siteNoticeSuccess = ref('')
+const siteNoticeLoading = ref(false)
+
 // 邮箱后缀白名单
 const emailDomainWhitelist = ref('')
 const emailDomainWhitelistError = ref('')
@@ -194,6 +202,7 @@ onMounted(async () => {
   await loadApiKey()
   await Promise.all([
     loadFeatureFlags(),
+    loadSiteNoticeSettings(),
     loadEmailDomainWhitelist(),
     loadPointsWithdrawSettings(),
     loadSmtpSettings(),
@@ -254,6 +263,46 @@ const saveFeatureFlags = async () => {
     featureFlagsError.value = err.response?.data?.error || '保存失败'
   } finally {
     featureFlagsLoading.value = false
+  }
+}
+
+const loadSiteNoticeSettings = async () => {
+  siteNoticeError.value = ''
+  siteNoticeSuccess.value = ''
+  try {
+    const response = await adminService.getSiteNoticeSettings()
+    const next = response.siteNotice || { enabled: false, text: '', link: '' }
+    siteNoticeEnabled.value = Boolean(next.enabled)
+    siteNoticeText.value = String(next.text || '')
+    siteNoticeLink.value = String(next.link || '')
+  } catch (err: any) {
+    siteNoticeError.value = err.response?.data?.error || '加载站点公告失败'
+  }
+}
+
+const saveSiteNoticeSettings = async () => {
+  siteNoticeError.value = ''
+  siteNoticeSuccess.value = ''
+  siteNoticeLoading.value = true
+  try {
+    const response = await adminService.updateSiteNoticeSettings({
+      siteNotice: {
+        enabled: siteNoticeEnabled.value,
+        text: String(siteNoticeText.value || '').trim(),
+        link: String(siteNoticeLink.value || '').trim()
+      }
+    })
+    const next = response.siteNotice || { enabled: false, text: '', link: '' }
+    siteNoticeEnabled.value = Boolean(next.enabled)
+    siteNoticeText.value = String(next.text || '')
+    siteNoticeLink.value = String(next.link || '')
+    appConfigStore.siteNotice = { ...next }
+    siteNoticeSuccess.value = '已保存'
+    setTimeout(() => (siteNoticeSuccess.value = ''), 3000)
+  } catch (err: any) {
+    siteNoticeError.value = err.response?.data?.error || '保存站点公告失败'
+  } finally {
+    siteNoticeLoading.value = false
   }
 }
 
@@ -1148,6 +1197,79 @@ const savePointsWithdrawSettings = async () => {
               @click="saveFeatureFlags"
             >
               {{ featureFlagsLoading ? '保存中...' : '保存功能开关' }}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <!-- 站点公告配置 -->
+      <Card v-if="isSuperAdmin" class="bg-white rounded-[32px] border border-gray-100 shadow-sm overflow-hidden flex flex-col lg:col-span-2">
+        <CardHeader class="border-b border-gray-50 bg-gray-50/30 px-6 py-5 sm:px-8 sm:py-6">
+          <CardTitle class="text-xl font-bold text-gray-900">站点公告</CardTitle>
+          <CardDescription class="text-gray-500">全站置顶公告（未登录页面同样可见）。启用且文案非空时才会展示。</CardDescription>
+        </CardHeader>
+        <CardContent class="p-6 sm:p-8 space-y-5 flex-1">
+          <div class="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100">
+            <div class="space-y-1">
+              <p class="font-medium text-gray-900">启用公告条</p>
+              <p class="text-xs text-gray-500">关闭后全站不显示</p>
+            </div>
+            <input
+              type="checkbox"
+              v-model="siteNoticeEnabled"
+              class="w-6 h-6 rounded-md border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+          </div>
+
+          <div class="space-y-2">
+            <Label for="siteNoticeText" class="text-xs font-semibold text-gray-500 uppercase tracking-wider">公告文案</Label>
+            <Input
+              id="siteNoticeText"
+              v-model="siteNoticeText"
+              type="text"
+              placeholder="例如：春节期间客服响应时间可能延迟，请耐心等待"
+              class="h-11 bg-gray-50 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all text-sm"
+              :disabled="siteNoticeLoading"
+            />
+          </div>
+
+          <div class="space-y-2">
+            <Label for="siteNoticeLink" class="text-xs font-semibold text-gray-500 uppercase tracking-wider">公告链接（可选）</Label>
+            <Input
+              id="siteNoticeLink"
+              v-model="siteNoticeLink"
+              type="url"
+              placeholder="https://example.com/notice"
+              class="h-11 bg-gray-50 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all text-sm"
+              :disabled="siteNoticeLoading"
+            />
+            <p class="text-xs text-gray-400">仅支持 http:// 或 https:// 链接，留空表示不跳转。</p>
+          </div>
+
+          <div v-if="siteNoticeError" class="rounded-xl bg-red-50 p-4 text-red-600 border border-red-100 text-sm font-medium">
+            {{ siteNoticeError }}
+          </div>
+
+          <div v-if="siteNoticeSuccess" class="rounded-xl bg-green-50 p-4 text-green-600 border border-green-100 text-sm font-medium">
+            {{ siteNoticeSuccess }}
+          </div>
+
+          <div class="flex flex-col sm:flex-row gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              class="w-full sm:w-auto h-11 px-4 border-gray-200 rounded-xl"
+              @click="loadSiteNoticeSettings"
+            >
+              刷新
+            </Button>
+            <Button
+              type="button"
+              :disabled="siteNoticeLoading"
+              class="w-full h-11 rounded-xl bg-black hover:bg-gray-800 text-white shadow-lg shadow-black/5"
+              @click="saveSiteNoticeSettings"
+            >
+              {{ siteNoticeLoading ? '保存中...' : '保存公告配置' }}
             </Button>
           </div>
         </CardContent>
