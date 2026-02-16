@@ -5,6 +5,7 @@ import { AccountSyncError, deleteAccountUser, fetchAccountUsersList, syncAccount
 import { sendOpenAccountsSweeperReportEmail } from './email-service.js'
 import { getFeatureFlags, isFeatureEnabled } from '../utils/feature-flags.js'
 import { SPACE_MEMBER_LIMIT } from '../utils/space-capacity.js'
+import { enqueueAccountExceptionParseFailure, upsertAccountExceptionHistory } from './account-exception-history.js'
 
 const DEFAULT_INTERVAL_HOURS = 1
 const DEFAULT_MAX_JOINED = SPACE_MEMBER_LIMIT
@@ -33,6 +34,51 @@ const intervalHours = () => Math.max(1, toInt(process.env.OPEN_ACCOUNTS_SWEEPER_
 const maxJoined = () => Math.max(0, toInt(process.env.OPEN_ACCOUNTS_MAX_JOINED, DEFAULT_MAX_JOINED))
 const concurrency = () => Math.max(1, toInt(process.env.OPEN_ACCOUNTS_SWEEPER_CONCURRENCY, 3))
 const createdWithinDays = () => Math.max(0, toInt(process.env.OPEN_ACCOUNTS_SWEEPER_CREATED_WITHIN_DAYS, DEFAULT_CREATED_WITHIN_DAYS))
+
+const OPEN_ACCOUNTS_SWEEPER_SOURCE = 'open_accounts_sweeper'
+const OPEN_ACCOUNTS_SWEEPER_EXCEPTION_TYPE = 'open_account_sweeper_failure'
+
+export const mapOpenAccountsSweeperExceptionCode = ({ status, stage } = {}) => {
+  const numericStatus = Number.parseInt(String(status ?? ''), 10)
+  if (Number.isFinite(numericStatus) && numericStatus > 0) {
+    return `http_${numericStatus}`
+  }
+  const normalizedStage = String(stage || '').trim().toLowerCase()
+  if (normalizedStage) {
+    return `stage_${normalizedStage.replace(/[^a-z0-9_]+/g, '_')}`
+  }
+  return 'unknown'
+}
+
+export const upsertOpenAccountsSweeperException = async (
+  { accountId, accountName, exceptionCode, exceptionMessage, rawPayload } = {},
+  options = {}
+) => {
+  const normalizedAccountId = Number.parseInt(String(accountId ?? ''), 10)
+  if (!Number.isFinite(normalizedAccountId) || normalizedAccountId <= 0) {
+    await enqueueAccountExceptionParseFailure({
+      source: OPEN_ACCOUNTS_SWEEPER_SOURCE,
+      reason: 'missing_account_id',
+      rawPayload: rawPayload || {
+        accountId,
+        accountName,
+        exceptionCode,
+        exceptionMessage,
+      },
+    }, options)
+    return { ok: false, reason: 'missing_account_id' }
+  }
+
+  return upsertAccountExceptionHistory({
+    accountId: normalizedAccountId,
+    accountName: String(accountName || '').trim() || null,
+    exceptionType: OPEN_ACCOUNTS_SWEEPER_EXCEPTION_TYPE,
+    exceptionCode: String(exceptionCode || 'unknown').trim() || 'unknown',
+    exceptionMessage: String(exceptionMessage || '').trim() || 'Open 账号扫描失败',
+    source: OPEN_ACCOUNTS_SWEEPER_SOURCE,
+    status: 'active',
+  }, options)
+}
 
 const parseTime = (value) => {
   const time = Date.parse(String(value || ''))
@@ -280,13 +326,47 @@ export const startOpenAccountsOvercapacitySweeper = () => {
                   failedUsers: outcome?.failedUsers || []
                 })
               }
+
+              if ((outcome?.failedUsers || []).length > 0) {
+                const firstFailedUser = outcome.failedUsers[0] || {}
+                const failedStatus = Number.parseInt(String(firstFailedUser.status ?? ''), 10)
+                const failedMessage = String(firstFailedUser.message || '').trim() || '账号容量治理时踢人失败'
+                await upsertOpenAccountsSweeperException({
+                  accountId: id,
+                  accountName: emailPrefix,
+                  exceptionCode: mapOpenAccountsSweeperExceptionCode({ status: failedStatus, stage: 'enforce_account_capacity' }),
+                  exceptionMessage: failedMessage,
+                  rawPayload: {
+                    accountId: id,
+                    emailPrefix,
+                    stage: 'enforce_account_capacity',
+                    failedUsers: outcome.failedUsers,
+                  },
+                })
+              }
             } catch (error) {
+              const status = error instanceof AccountSyncError ? error.status : error?.status
+              const code = mapOpenAccountsSweeperExceptionCode({ status, stage: 'worker' })
+              const message = error?.message || String(error)
               console.error('[OpenAccountsSweeper] sweep error', {
                 accountId: id,
                 proxy: proxyLabel,
-                message: error?.message || String(error)
+                message
               })
-              failures.push({ accountId: id, emailPrefix, error: error?.message || String(error) })
+              failures.push({ accountId: id, emailPrefix, error: message })
+              await upsertOpenAccountsSweeperException({
+                accountId: id,
+                accountName: emailPrefix,
+                exceptionCode: code,
+                exceptionMessage: message,
+                rawPayload: {
+                  accountId: id,
+                  emailPrefix,
+                  stage: 'worker',
+                  status,
+                  message,
+                },
+              })
             }
           })
         }
