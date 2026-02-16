@@ -17,3 +17,5 @@ assert.ok(appConfigStore.includes('if (config.siteNotice && typeof config.siteNo
 assert.ok(redeemShell.includes('userStatusBarOffsetClass'), '购买页用户状态条应根据公告动态下移，避免重叠')
 
 console.log('site notice bar tests passed')
+
+assert.ok(noticeBar.includes('needsUserStatusSafeArea'), '购买页公告应预留右上角用户状态区安全间距')
