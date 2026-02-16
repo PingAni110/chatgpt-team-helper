@@ -430,6 +430,12 @@ export interface AccountRecoveryData {
   windowEndsAt?: string | null
 }
 
+export interface SiteNoticeConfig {
+  enabled: boolean
+  text: string
+  link: string
+}
+
 export interface AppRuntimeConfig {
   timezone: string
   locale: string
@@ -443,6 +449,7 @@ export interface AppRuntimeConfig {
   }
   openAccountsEnabled?: boolean
   openAccountsMaintenanceMessage?: string | null
+  siteNotice?: SiteNoticeConfig
 }
 
 export interface PurchaseMeta {
@@ -866,6 +873,10 @@ export interface AdminFeatureFlagsResponse {
   }
 }
 
+export interface AdminSiteNoticeSettingsResponse {
+  siteNotice: SiteNoticeConfig
+}
+
 export interface AdminPointsWithdrawSettingsResponse {
   rate: {
     points: number
@@ -1059,6 +1070,18 @@ export const adminService = {
 
   async getFeatureFlags(): Promise<AdminFeatureFlagsResponse> {
     const response = await api.get('/admin/feature-flags')
+    return response.data
+  },
+
+  async getSiteNoticeSettings(): Promise<AdminSiteNoticeSettingsResponse> {
+    const response = await api.get('/admin/site-notice-settings')
+    return response.data
+  },
+
+  async updateSiteNoticeSettings(payload: {
+    siteNotice: SiteNoticeConfig
+  }): Promise<AdminSiteNoticeSettingsResponse> {
+    const response = await api.put('/admin/site-notice-settings', payload)
     return response.data
   },
 

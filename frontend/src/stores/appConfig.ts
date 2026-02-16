@@ -7,6 +7,12 @@ const DEFAULT_LOCALE = 'zh-CN'
 const DEFAULT_OPEN_ACCOUNTS_MAINTENANCE_MESSAGE = '平台维护中'
 const FALLBACK_TURNSTILE_SITE_KEY = (import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim()
 
+export type SiteNoticeState = {
+  enabled: boolean
+  text: string
+  link: string
+}
+
 export type FeatureFlags = {
   xhs: boolean
   xianyu: boolean
@@ -22,6 +28,11 @@ export const useAppConfigStore = defineStore('app-config', () => {
   const turnstileEnabled = ref<boolean | null>(null)
   const openAccountsEnabled = ref(true)
   const openAccountsMaintenanceMessage = ref(DEFAULT_OPEN_ACCOUNTS_MAINTENANCE_MESSAGE)
+  const siteNotice = ref<SiteNoticeState>({
+    enabled: false,
+    text: '',
+    link: ''
+  })
   const features = ref<FeatureFlags>({
     xhs: true,
     xianyu: true,
@@ -63,6 +74,13 @@ export const useAppConfigStore = defineStore('app-config', () => {
       const value = (config.openAccountsMaintenanceMessage || '').trim()
       openAccountsMaintenanceMessage.value = value || DEFAULT_OPEN_ACCOUNTS_MAINTENANCE_MESSAGE
     }
+    if (config.siteNotice && typeof config.siteNotice === 'object') {
+      siteNotice.value = {
+        enabled: Boolean(config.siteNotice.enabled),
+        text: String(config.siteNotice.text || '').trim(),
+        link: String(config.siteNotice.link || '').trim()
+      }
+    }
     if (config.features && typeof config.features === 'object') {
       const next = { ...features.value }
       if ('xhs' in config.features) next.xhs = Boolean((config.features as any).xhs)
@@ -93,6 +111,7 @@ export const useAppConfigStore = defineStore('app-config', () => {
     turnstileEnabled,
     openAccountsEnabled,
     openAccountsMaintenanceMessage,
+    siteNotice,
     features,
     resolvedTurnstileSiteKey,
     resolvedTurnstileEnabled,

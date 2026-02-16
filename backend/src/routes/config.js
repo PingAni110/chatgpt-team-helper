@@ -1,6 +1,8 @@
 import express from 'express'
+import { getDatabase } from '../database/init.js'
 import { getTurnstileSettings } from '../utils/turnstile-settings.js'
 import { getFeatureFlags } from '../utils/feature-flags.js'
+import { getSystemConfigValue } from '../utils/system-config.js'
 
 const router = express.Router()
 
@@ -21,6 +23,16 @@ const getOpenAccountsMaintenanceMessage = () => {
   return message || DEFAULT_OPEN_ACCOUNTS_MAINTENANCE_MESSAGE
 }
 
+const getSiteNoticeConfig = async () => {
+  const db = await getDatabase()
+  const enabledRaw = String(getSystemConfigValue(db, 'site_notice_enabled') || '').trim().toLowerCase()
+  return {
+    enabled: enabledRaw === '1' || enabledRaw === 'true' || enabledRaw === 'yes' || enabledRaw === 'on',
+    text: String(getSystemConfigValue(db, 'site_notice_text') || '').trim(),
+    link: String(getSystemConfigValue(db, 'site_notice_link') || '').trim()
+  }
+}
+
 router.get('/runtime', async (req, res) => {
   try {
     const timezone = process.env.TZ || DEFAULT_TIMEZONE
@@ -29,6 +41,7 @@ router.get('/runtime', async (req, res) => {
     const turnstileSettings = await getTurnstileSettings()
     const turnstileSiteKey = String(turnstileSettings.siteKey || '').trim()
     const features = await getFeatureFlags()
+    const siteNotice = await getSiteNoticeConfig()
 
     res.json({
       timezone,
@@ -37,7 +50,8 @@ router.get('/runtime', async (req, res) => {
       turnstileSiteKey: turnstileSiteKey || null,
       features,
       openAccountsEnabled,
-      openAccountsMaintenanceMessage: openAccountsEnabled ? null : getOpenAccountsMaintenanceMessage()
+      openAccountsMaintenanceMessage: openAccountsEnabled ? null : getOpenAccountsMaintenanceMessage(),
+      siteNotice
     })
   } catch (error) {
     console.error('[Config] runtime error:', error)

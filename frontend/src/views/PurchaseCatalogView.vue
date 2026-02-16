@@ -1,6 +1,7 @@
 <template>
-  <RedeemShell :maxWidth="'max-w-[1240px]'" showUserStatusBar>
-    <div class="text-center space-y-6">
+  <RedeemShell :maxWidth="'max-w-[1280px]'" showUserStatusBar>
+    <div class="mx-auto w-full max-w-6xl px-2 sm:px-4 space-y-8">
+      <div class="text-center space-y-6">
       <div class="space-y-3">
         <h1
           class="text-[40px] leading-tight font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 dark:from-blue-400 dark:via-purple-400 dark:to-pink-400 drop-shadow-sm animate-gradient-x"
@@ -18,7 +19,7 @@
       {{ errorMessage }}
     </div>
 
-    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5 sm:gap-6 xl:gap-7 2xl:gap-8">
+      <div class="mx-auto grid w-full grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3 xl:gap-7 2xl:gap-8">
       <RouterLink
         v-for="plan in plans"
         :key="plan.key"
@@ -87,6 +88,7 @@
           </AppleCard>
         </div>
       </RouterLink>
+      </div>
     </div>
   </RedeemShell>
 </template>

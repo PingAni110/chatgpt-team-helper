@@ -1,5 +1,6 @@
 <template>
-  <RedeemShell :maxWidth="'max-w-[560px]'" showUserStatusBar>
+  <RedeemShell :maxWidth="'max-w-[960px]'" showUserStatusBar>
+    <div class="mx-auto w-full max-w-3xl px-2 sm:px-4 space-y-8">
     <div class="flex items-center justify-between">
       <RouterLink
         to="/purchase"
@@ -101,10 +102,11 @@
               <input
                 v-model.trim="redeemEmail"
                 type="email"
-                placeholder="请输入接收邀请的邮箱"
+                placeholder="请输入邮箱"
                 class="w-full rounded-xl border border-gray-200/80 bg-white/80 px-3 py-2 text-sm outline-none focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20"
                 :disabled="redeemLoading"
               />
+              <p class="text-[12px] text-[#86868b]">请输入你的邮箱</p>
             </div>
 
             <AppleButton
@@ -135,6 +137,8 @@
       </AppleCard>
     </div>
 
+    </div>
+
     <PurchaseCheckoutDrawer
       v-if="planKey"
       :open="isCheckoutOpen"
@@ -154,7 +158,7 @@ import RedeemShell from '@/components/RedeemShell.vue'
 import AppleCard from '@/components/ui/apple/Card.vue'
 import AppleButton from '@/components/ui/apple/Button.vue'
 import PurchaseCheckoutDrawer from '@/components/purchase/PurchaseCheckoutDrawer.vue'
-import { authService, purchaseService, redemptionCodeService, type PurchaseMeta, type PurchasePlan, type PurchaseOrderType } from '@/services/api'
+import { purchaseService, redemptionCodeService, type PurchaseMeta, type PurchasePlan, type PurchaseOrderType } from '@/services/api'
 import { ArrowLeft } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -165,7 +169,7 @@ const errorMessage = ref('')
 const loading = ref(false)
 const isCheckoutOpen = ref(false)
 const redeemCode = ref('')
-const redeemEmail = ref(String(authService.getCurrentUser()?.email || '').trim())
+const redeemEmail = ref('')
 const redeemLoading = ref(false)
 const redeemErrorMessage = ref('')
 
@@ -278,8 +282,12 @@ const submitRedeemCode = async () => {
     redeemErrorMessage.value = '兑换码格式不正确，应为 XXXX-XXXX-XXXX'
     return
   }
-  if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
-    redeemErrorMessage.value = '请输入有效邮箱'
+  if (!email) {
+    redeemErrorMessage.value = '请输入邮箱'
+    return
+  }
+  if (!/^\S+@\S+\.\S+$/.test(email)) {
+    redeemErrorMessage.value = '邮箱格式不正确'
     return
   }
 
