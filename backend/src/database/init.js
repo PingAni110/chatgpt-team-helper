@@ -287,6 +287,7 @@ const ensureRbacTables = (database) => {
       { key: 'redemption_codes', label: '兑换码管理', path: '/admin/redemption-codes', sortOrder: 4 },
       { key: 'product_management', label: '商品管理', path: '/admin/product-management', sortOrder: 5 },
       { key: 'product_management_list', label: '商品列表', path: '/admin/product-management/list', parentKey: 'product_management', sortOrder: 1 },
+      { key: 'product_management_site_notice', label: '公告设置', path: '/admin/product-management/site-notice', parentKey: 'product_management', sortOrder: 2 },
       { key: 'order_management', label: '订单管理', path: '', sortOrder: 6 },
       { key: 'purchase_orders', label: '支付订单', path: '/admin/purchase-orders', parentKey: 'order_management', sortOrder: 1 },
       { key: 'xhs_orders', label: '小红书订单', path: '/admin/xhs-orders', parentKey: 'order_management', sortOrder: 2 },

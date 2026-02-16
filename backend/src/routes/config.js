@@ -28,8 +28,7 @@ const getSiteNoticeConfig = async () => {
   const enabledRaw = String(getSystemConfigValue(db, 'site_notice_enabled') || '').trim().toLowerCase()
   return {
     enabled: enabledRaw === '1' || enabledRaw === 'true' || enabledRaw === 'yes' || enabledRaw === 'on',
-    text: String(getSystemConfigValue(db, 'site_notice_text') || '').trim(),
-    link: String(getSystemConfigValue(db, 'site_notice_link') || '').trim()
+    text: String(getSystemConfigValue(db, 'site_notice_text') || '').trim()
   }
 }
 
