@@ -32,6 +32,7 @@ import UserInfoView from '../views/UserInfoView.vue'
 import PointsExchangeView from '../views/PointsExchangeView.vue'
 import RoleManagementView from '../views/RoleManagementView.vue'
 import MenuManagementView from '../views/MenuManagementView.vue'
+import HistoryExceptionsView from '../views/history-exceptions/HistoryExceptionsView.vue'
 import { authService } from '@/services/api'
 import FeatureDisabledView from '../views/FeatureDisabledView.vue'
 import { useAppConfigStore } from '@/stores/appConfig'
@@ -169,6 +170,16 @@ const router = createRouter({
           name: 'account-recovery-admin',
           component: AccountRecoveryAdminView,
           meta: { requiredMenuKey: 'account_recovery', superAdminOnly: true },
+        },
+        {
+          path: 'exception-management',
+          redirect: '/admin/history-exceptions',
+        },
+        {
+          path: 'history-exceptions',
+          name: 'history-exceptions',
+          component: HistoryExceptionsView,
+          meta: { requiredMenuKey: 'history_exception:view' },
         },
         {
           path: 'stats',

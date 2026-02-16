@@ -12,7 +12,8 @@ import {
   Ticket,
   Package,
   Train,
-  Settings
+  Settings,
+  AlertTriangle
 } from 'lucide-vue-next'
 
 export interface AdminMenuNode {
@@ -61,6 +62,9 @@ const ICONS_BY_MENU_KEY: Record<string, any> = {
   permission_management: Shield,
   role_management: Users,
   menu_management: Menu,
+  history_exceptions: AlertTriangle,
+  'history_exception:view': AlertTriangle,
+  'history_exception:update': AlertTriangle,
 }
 
 const FALLBACK_ADMIN_MENU_TREE: AdminMenuDraftNode[] = [
@@ -102,6 +106,7 @@ const FALLBACK_ADMIN_MENU_TREE: AdminMenuDraftNode[] = [
   { key: 'settings', path: '/admin/settings', label: '系统设置' },
   { key: 'my_orders', path: '/admin/my-orders', label: '我的订单' },
   { key: 'points_exchange', path: '/admin/points-exchange', label: '积分兑换' },
+  { key: 'history_exceptions', path: '/admin/history-exceptions', label: '历史异常' },
   { key: 'waiting_room', path: '/admin/waiting-room', label: '候车室管理' },
 ]
 
