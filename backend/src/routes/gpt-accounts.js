@@ -110,6 +110,110 @@ const startSyncAllTask = async ({ ids, db }) => {
 
 const normalizeEmail = (value) => String(value ?? '').trim().toLowerCase()
 
+
+const getProtectedSeatEmailSet = async (database) => {
+  if (!database) return new Set()
+  const result = database.exec(
+    `
+      SELECT target_email
+      FROM open_account_seat_protections
+      WHERE target_email IS NOT NULL
+        AND TRIM(target_email) <> ''
+        AND (expires_at IS NULL OR expires_at = '' OR expires_at > DATETIME('now', 'localtime'))
+    `
+  )
+
+  const rows = result[0]?.values || []
+  return new Set(
+    rows
+      .map(row => normalizeEmail(row[0]))
+      .filter(Boolean)
+  )
+}
+
+
+const upsertSystemInviteProtection = async (database, email) => {
+  if (!database) return
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return
+
+  const existing = database.exec(
+    `
+      SELECT id
+      FROM open_account_seat_protections
+      WHERE lower(target_email) = ?
+        AND source_channel = 'system_invite'
+      LIMIT 1
+    `,
+    [normalizedEmail]
+  )
+
+  if (existing[0]?.values?.length) {
+    const protectionId = Number(existing[0].values[0][0])
+    database.run(
+      `
+        UPDATE open_account_seat_protections
+        SET expires_at = NULL,
+            updated_at = DATETIME('now', 'localtime')
+        WHERE id = ?
+      `,
+      [protectionId]
+    )
+    return
+  }
+
+  database.run(
+    `
+      INSERT INTO open_account_seat_protections (
+        target_email,
+        source_channel,
+        created_at,
+        updated_at
+      )
+      VALUES (?, 'system_invite', DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))
+    `,
+    [normalizedEmail]
+  )
+}
+
+const appendProtectedMemberSuffix = (usersResponse, protectedEmailSet) => {
+  if (!usersResponse || !Array.isArray(usersResponse.items)) return usersResponse
+
+  return {
+    ...usersResponse,
+    items: usersResponse.items.map(user => {
+      const rawEmail = String(user?.email || '').trim()
+      const email = normalizeEmail(rawEmail)
+      const isProtected = Boolean(email && protectedEmailSet.has(email))
+      return {
+        ...user,
+        isProtected,
+        emailDisplay: isProtected && rawEmail ? `${rawEmail} [保护]` : rawEmail
+      }
+    })
+  }
+}
+
+
+const appendProtectedInviteSuffix = (invitesResponse, protectedEmailSet) => {
+  if (!invitesResponse || !Array.isArray(invitesResponse.items)) return invitesResponse
+
+  return {
+    ...invitesResponse,
+    items: invitesResponse.items.map(invite => {
+      const rawEmail = String(invite?.email_address || '').trim()
+      const email = normalizeEmail(rawEmail)
+      const isProtected = Boolean(email && protectedEmailSet.has(email))
+      return {
+        ...invite,
+        isProtected,
+        emailDisplay: isProtected && rawEmail ? `${rawEmail} [保护]` : rawEmail
+      }
+    })
+  }
+}
+
+
 const normalizeBoolean = (value) => {
   if (typeof value === 'boolean') return value
   if (typeof value === 'number') {
@@ -1263,6 +1367,8 @@ router.post('/:id/sync-user-count', async (req, res) => {
     })
     const db = await getDatabase()
     await markAccountSpaceStatus(db, accountId, { code: 'normal', reason: '正常' })
+    const protectedEmailSet = await getProtectedSeatEmailSet(db)
+    const usersWithProtectionTag = appendProtectedMemberSuffix(userSync.users, protectedEmailSet)
     res.json({
       message: '账号同步成功',
       account: {
@@ -1273,7 +1379,7 @@ router.post('/:id/sync-user-count', async (req, res) => {
       },
       syncedUserCount: userSync.syncedUserCount,
       inviteCount: inviteSync.inviteCount,
-      users: userSync.users
+      users: usersWithProtectionTag
     })
   } catch (error) {
     console.error('同步账号人数错误:', error)
@@ -1297,11 +1403,14 @@ router.post('/:id/sync-user-count', async (req, res) => {
 router.delete('/:id/users/:userId', async (req, res) => {
   try {
     const { account, syncedUserCount, users } = await deleteAccountUser(Number(req.params.id), req.params.userId)
+    const db = await getDatabase()
+    const protectedEmailSet = await getProtectedSeatEmailSet(db)
+    const usersWithProtectionTag = appendProtectedMemberSuffix(users, protectedEmailSet)
     res.json({
       message: '成员删除成功',
       account,
       syncedUserCount,
-      users
+      users: usersWithProtectionTag
     })
   } catch (error) {
     console.error('删除成员失败:', error)
@@ -1320,7 +1429,13 @@ router.post('/:id/invite-user', async (req, res) => {
     if (!email) {
       return res.status(400).json({ error: '请提供邀请邮箱地址' })
     }
-    const result = await inviteAccountUser(Number(req.params.id), email)
+    const normalizedInviteEmail = normalizeEmail(email)
+    const result = await inviteAccountUser(Number(req.params.id), normalizedInviteEmail)
+
+    const db = await getDatabase()
+    await upsertSystemInviteProtection(db, normalizedInviteEmail)
+    saveDatabase()
+
     let inviteCount = null
     try {
       const synced = await syncAccountInviteCount(Number(req.params.id), {
@@ -1352,7 +1467,10 @@ router.get('/:id/invites', async (req, res) => {
     const { invites } = await syncAccountInviteCount(Number(req.params.id), {
       inviteListParams: req.query || {}
     })
-    res.json(invites)
+    const db = await getDatabase()
+    const protectedEmailSet = await getProtectedSeatEmailSet(db)
+    const invitesWithProtectionTag = appendProtectedInviteSuffix(invites, protectedEmailSet)
+    res.json(invitesWithProtectionTag)
   } catch (error) {
     console.error('获取邀请列表失败:', error)
 

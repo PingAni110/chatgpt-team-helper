@@ -144,6 +144,51 @@ function generateRedemptionCode(length = 12) {
 
 const normalizeEmail = (value) => String(value ?? '').trim().toLowerCase()
 
+
+const upsertRedemptionSeatProtection = (db, email, sourceChannel = 'system_redemption') => {
+  if (!db) return
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return
+
+  const existing = db.exec(
+    `
+      SELECT id
+      FROM open_account_seat_protections
+      WHERE lower(target_email) = ?
+        AND source_channel = ?
+      LIMIT 1
+    `,
+    [normalizedEmail, sourceChannel]
+  )
+
+  if (existing[0]?.values?.length) {
+    const protectionId = Number(existing[0].values[0][0])
+    db.run(
+      `
+        UPDATE open_account_seat_protections
+        SET expires_at = NULL,
+            updated_at = DATETIME('now', 'localtime')
+        WHERE id = ?
+      `,
+      [protectionId]
+    )
+    return
+  }
+
+  db.run(
+    `
+      INSERT INTO open_account_seat_protections (
+        target_email,
+        source_channel,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, DATETIME('now', 'localtime'), DATETIME('now', 'localtime'))
+    `,
+    [normalizedEmail, sourceChannel]
+  )
+}
+
 const buildRecoveryWindowEndsAt = (redeemedAt) => {
   if (!redeemedAt) return null
   const redeemedTime = new Date(redeemedAt).getTime()
@@ -457,6 +502,9 @@ export async function redeemCodeInternal({
         )
       }
     }
+
+    const protectionSourceChannel = reservedForOrderNo ? 'system_purchase' : 'system_redemption'
+    upsertRedemptionSeatProtection(db, normalizedEmail, protectionSourceChannel)
 
     saveDatabase()
   } catch (error) {
