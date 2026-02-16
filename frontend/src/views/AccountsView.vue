@@ -2111,7 +2111,10 @@ const handleInviteSubmit = async () => {
                           <tr v-for="user in syncResult.users?.items" :key="user.id" class="group hover:bg-gray-50/50">
                              <td class="px-4 py-3">
                           <div class="font-medium text-gray-900">{{ user.name }}</div>
-                                <div class="text-xs text-gray-400">{{ user.emailDisplay || user.email }}</div>
+                                <div class="text-xs text-gray-400 flex items-center gap-2 flex-wrap">
+                                  <span>{{ user.email }}</span>
+                                  <span v-if="user.isProtected" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700 border border-amber-200">[保护]</span>
+                                </div>
                              </td>
                              <td class="px-4 py-3 text-gray-500">
                                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 capitalize">
@@ -2153,7 +2156,10 @@ const handleInviteSubmit = async () => {
                        <tbody class="divide-y divide-gray-50">
                           <tr v-for="invite in invitesList" :key="invite.id" class="group hover:bg-gray-50/50">
                              <td class="px-4 py-3">
-                                <div class="font-medium text-gray-900">{{ invite.email_address }}</div>
+                                <div class="font-medium text-gray-900 flex items-center gap-2 flex-wrap">
+                                  <span>{{ invite.email_address }}</span>
+                                  <span v-if="invite.isProtected" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700 border border-amber-200">[保护]</span>
+                                </div>
                              </td>
                              <td class="px-4 py-3 text-gray-500">
                                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 capitalize">

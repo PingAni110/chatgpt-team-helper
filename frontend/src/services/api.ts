@@ -338,6 +338,8 @@ export interface ChatgptAccountInviteItem {
   role?: string
   created_time?: string
   is_scim_managed?: boolean
+  isProtected?: boolean
+  emailDisplay?: string
 }
 
 export interface ChatgptAccountInvitesResponse {

@@ -195,6 +195,25 @@ const appendProtectedMemberSuffix = (usersResponse, protectedEmailSet) => {
 }
 
 
+const appendProtectedInviteSuffix = (invitesResponse, protectedEmailSet) => {
+  if (!invitesResponse || !Array.isArray(invitesResponse.items)) return invitesResponse
+
+  return {
+    ...invitesResponse,
+    items: invitesResponse.items.map(invite => {
+      const rawEmail = String(invite?.email_address || '').trim()
+      const email = normalizeEmail(rawEmail)
+      const isProtected = Boolean(email && protectedEmailSet.has(email))
+      return {
+        ...invite,
+        isProtected,
+        emailDisplay: isProtected && rawEmail ? `${rawEmail} [保护]` : rawEmail
+      }
+    })
+  }
+}
+
+
 const normalizeBoolean = (value) => {
   if (typeof value === 'boolean') return value
   if (typeof value === 'number') {
@@ -1448,7 +1467,10 @@ router.get('/:id/invites', async (req, res) => {
     const { invites } = await syncAccountInviteCount(Number(req.params.id), {
       inviteListParams: req.query || {}
     })
-    res.json(invites)
+    const db = await getDatabase()
+    const protectedEmailSet = await getProtectedSeatEmailSet(db)
+    const invitesWithProtectionTag = appendProtectedInviteSuffix(invites, protectedEmailSet)
+    res.json(invitesWithProtectionTag)
   } catch (error) {
     console.error('获取邀请列表失败:', error)
 
