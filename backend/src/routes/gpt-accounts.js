@@ -110,6 +110,46 @@ const startSyncAllTask = async ({ ids, db }) => {
 
 const normalizeEmail = (value) => String(value ?? '').trim().toLowerCase()
 
+
+const getProtectedSeatEmailSet = async (database) => {
+  if (!database) return new Set()
+  const result = database.exec(
+    `
+      SELECT target_email
+      FROM open_account_seat_protections
+      WHERE target_email IS NOT NULL
+        AND TRIM(target_email) <> ''
+        AND (expires_at IS NULL OR expires_at = '' OR expires_at > DATETIME('now', 'localtime'))
+    `
+  )
+
+  const rows = result[0]?.values || []
+  return new Set(
+    rows
+      .map(row => normalizeEmail(row[0]))
+      .filter(Boolean)
+  )
+}
+
+const appendProtectedMemberSuffix = (usersResponse, protectedEmailSet) => {
+  if (!usersResponse || !Array.isArray(usersResponse.items)) return usersResponse
+
+  return {
+    ...usersResponse,
+    items: usersResponse.items.map(user => {
+      const rawEmail = String(user?.email || '').trim()
+      const email = normalizeEmail(rawEmail)
+      const isProtected = Boolean(email && protectedEmailSet.has(email))
+      return {
+        ...user,
+        isProtected,
+        emailDisplay: isProtected && rawEmail ? `${rawEmail} [保护]` : rawEmail
+      }
+    })
+  }
+}
+
+
 const normalizeBoolean = (value) => {
   if (typeof value === 'boolean') return value
   if (typeof value === 'number') {
@@ -1263,6 +1303,8 @@ router.post('/:id/sync-user-count', async (req, res) => {
     })
     const db = await getDatabase()
     await markAccountSpaceStatus(db, accountId, { code: 'normal', reason: '正常' })
+    const protectedEmailSet = await getProtectedSeatEmailSet(db)
+    const usersWithProtectionTag = appendProtectedMemberSuffix(userSync.users, protectedEmailSet)
     res.json({
       message: '账号同步成功',
       account: {
@@ -1273,7 +1315,7 @@ router.post('/:id/sync-user-count', async (req, res) => {
       },
       syncedUserCount: userSync.syncedUserCount,
       inviteCount: inviteSync.inviteCount,
-      users: userSync.users
+      users: usersWithProtectionTag
     })
   } catch (error) {
     console.error('同步账号人数错误:', error)
@@ -1297,11 +1339,14 @@ router.post('/:id/sync-user-count', async (req, res) => {
 router.delete('/:id/users/:userId', async (req, res) => {
   try {
     const { account, syncedUserCount, users } = await deleteAccountUser(Number(req.params.id), req.params.userId)
+    const db = await getDatabase()
+    const protectedEmailSet = await getProtectedSeatEmailSet(db)
+    const usersWithProtectionTag = appendProtectedMemberSuffix(users, protectedEmailSet)
     res.json({
       message: '成员删除成功',
       account,
       syncedUserCount,
-      users
+      users: usersWithProtectionTag
     })
   } catch (error) {
     console.error('删除成员失败:', error)

@@ -27,4 +27,19 @@ const kickFor8 = selectUsersToKick({ users: users8, currentJoined: 8, maxJoinedC
 assert.equal(kickFor8.length, 3)
 assert.deepEqual(kickFor8.map(user => user.id), ['user-8', 'user-7', 'user-6'])
 
+
+const protectedCaseUsers = [
+  { id: 'user-a', email: 'a@example.com', created_time: '2024-01-01T00:00:01.000Z' },
+  { id: 'user-b', email: 'b@example.com', created_time: '2024-01-01T00:00:02.000Z' },
+  { id: 'user-c', email: 'c@example.com', created_time: '2024-01-01T00:00:03.000Z' },
+  { id: 'user-d', email: 'd@example.com', created_time: '2024-01-01T00:00:04.000Z' }
+]
+const kickWithProtected = selectUsersToKick({
+  users: protectedCaseUsers,
+  currentJoined: 4,
+  maxJoinedCount: 2,
+  protectedEmailSet: new Set(['d@example.com'])
+})
+assert.deepEqual(kickWithProtected.map(user => user.id), ['user-c', 'user-b'])
+
 console.log('open-accounts-sweeper tests passed')

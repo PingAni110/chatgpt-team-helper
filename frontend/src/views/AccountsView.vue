@@ -2111,7 +2111,7 @@ const handleInviteSubmit = async () => {
                           <tr v-for="user in syncResult.users?.items" :key="user.id" class="group hover:bg-gray-50/50">
                              <td class="px-4 py-3">
                           <div class="font-medium text-gray-900">{{ user.name }}</div>
-                                <div class="text-xs text-gray-400">{{ user.email }}</div>
+                                <div class="text-xs text-gray-400">{{ user.emailDisplay || user.email }}</div>
                              </td>
                              <td class="px-4 py-3 text-gray-500">
                                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 capitalize">

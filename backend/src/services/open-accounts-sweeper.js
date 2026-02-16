@@ -106,6 +106,27 @@ const fetchAllStandardUsers = async (accountId, { proxy } = {}) => {
   }
 }
 
+
+const listProtectedSeatEmails = async () => {
+  const db = await getDatabase()
+  const result = db.exec(
+    `
+      SELECT target_email
+      FROM open_account_seat_protections
+      WHERE target_email IS NOT NULL
+        AND TRIM(target_email) <> ''
+        AND (expires_at IS NULL OR expires_at = '' OR expires_at > DATETIME('now', 'localtime'))
+    `
+  )
+
+  const values = result[0]?.values || []
+  return new Set(
+    values
+      .map(row => String(row[0] || '').trim().toLowerCase())
+      .filter(Boolean)
+  )
+}
+
 export const sortUsersByJoinTimeDesc = (users) => {
   return [...(users || [])].sort((a, b) => {
     const diff = parseTime(b.created_time) - parseTime(a.created_time)
@@ -114,10 +135,26 @@ export const sortUsersByJoinTimeDesc = (users) => {
   })
 }
 
-export const selectUsersToKick = ({ users, currentJoined, maxJoinedCount }) => {
+export const selectUsersToKick = ({ users, currentJoined, maxJoinedCount, protectedEmailSet } = {}) => {
   const overflow = Math.max(0, Number(currentJoined || 0) - Number(maxJoinedCount || 0))
   if (overflow <= 0) return []
-  const sorted = sortUsersByJoinTimeDesc(users)
+
+  const protectedEmails = protectedEmailSet instanceof Set ? protectedEmailSet : new Set()
+  const protectedUsers = []
+  const normalUsers = []
+
+  for (const user of (users || [])) {
+    const email = String(user?.email || '').trim().toLowerCase()
+    if (email && protectedEmails.has(email)) {
+      protectedUsers.push(user)
+      continue
+    }
+    normalUsers.push(user)
+  }
+
+  const sortedNormalUsers = sortUsersByJoinTimeDesc(normalUsers)
+  const sortedProtectedUsers = sortUsersByJoinTimeDesc(protectedUsers)
+  const sorted = [...sortedNormalUsers, ...sortedProtectedUsers]
   return sorted.slice(0, overflow)
 }
 
@@ -146,7 +183,8 @@ const enforceAccountCapacity = async (accountId, { maxJoinedCount, proxy } = {})
       return { kicked, joined, beforeJoined, reason: 'no_standard_users', kickedUsers, skippedUsers, failedUsers }
     }
 
-    const toKick = selectUsersToKick({ users: candidates, currentJoined: joined, maxJoinedCount })
+    const protectedEmailSet = await listProtectedSeatEmails()
+    const toKick = selectUsersToKick({ users: candidates, currentJoined: joined, maxJoinedCount, protectedEmailSet })
     if (toKick.length === 0) break
 
     for (const user of toKick) {
