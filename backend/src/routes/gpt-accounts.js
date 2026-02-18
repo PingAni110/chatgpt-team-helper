@@ -6,6 +6,7 @@ import { apiKeyAuth } from '../middleware/api-key-auth.js'
 import { requireMenu } from '../middleware/rbac.js'
 import { syncAccountUserCount, syncAccountInviteCount, fetchOpenAiAccountInfo, AccountSyncError, deleteAccountUser, inviteAccountUser, deleteAccountInvite, isWorkspaceExpiredSyncError } from '../services/account-sync.js'
 import { SPACE_MEMBER_LIMIT, calcRedeemableSlots, normalizeMemberCount } from '../utils/space-capacity.js'
+import { getWorkspaceExpiredReason, isTokenInvalidSyncError, markAccountSpaceStatus, resolveSpaceStatus } from '../services/account-space-status.js'
 import { SPACE_TYPE_CHILD, normalizeSpaceType, shouldAutoGenerateCodes } from '../utils/space-type.js'
 import { withLocks } from '../utils/locks.js'
 
@@ -62,7 +63,7 @@ const startSyncAllTask = async ({ ids, db }) => {
             accountRecord: userSync.account,
             inviteListParams: { offset: 0, limit: 1, query: '' }
           })
-          await markAccountSpaceStatus(db, accountId, { code: 'normal', reason: '正常' })
+          await markAccountSpaceStatus(accountId, { code: 'normal', reason: '正常' }, { db })
           task.successCount += 1
           task.results.push({
             id: accountId,
@@ -78,10 +79,10 @@ const startSyncAllTask = async ({ ids, db }) => {
           })
         } catch (error) {
           if (isTokenInvalidSyncError(error)) {
-            await markAccountSpaceStatus(db, accountId, { code: 'abnormal', reason: 'Token 已过期或无效，请更新账号 token' })
+            await markAccountSpaceStatus(accountId, { code: 'abnormal', reason: 'Token 已过期或无效，请更新账号 token' }, { db })
           }
           if (isWorkspaceExpiredSyncError(error)) {
-            await markAccountSpaceStatus(db, accountId, { code: 'abnormal', reason: getWorkspaceExpiredReason() })
+            await markAccountSpaceStatus(accountId, { code: 'abnormal', reason: getWorkspaceExpiredReason() }, { db })
           }
           task.failedCount += 1
           task.results.push({ id: accountId, ok: false, error: error?.message || '同步失败', code: error?.code || null })
@@ -282,47 +283,6 @@ const normalizeShanghaiDateTime = (value) => {
 
 const normalizeSpaceTypeInput = (value, fallback = null) => normalizeSpaceType(value, fallback)
 
-const resolveSpaceStatus = (account) => {
-  const statusCode = String(account?.spaceStatusCode || account?.space_status_code || '').trim().toLowerCase()
-  const statusReason = String(account?.spaceStatusReason || account?.space_status_reason || '').trim()
-  if (statusCode === 'abnormal') {
-    return { code: 'abnormal', reason: statusReason || '空间异常' }
-  }
-  if (statusCode === 'unknown') {
-    return { code: 'unknown', reason: statusReason || '状态待确认' }
-  }
-  if (statusCode === 'normal') {
-    return { code: 'normal', reason: statusReason || '正常' }
-  }
-
-  if (Boolean(account?.isBanned)) {
-    return { code: 'abnormal', reason: '账号被封' }
-  }
-
-  const token = String(account?.token || '').trim()
-  if (!token) {
-    return { code: 'abnormal', reason: 'Token 失效' }
-  }
-
-  const userCount = Number(account?.userCount ?? account?.user_count ?? 0)
-  if (Number.isFinite(userCount) && userCount > SPACE_MEMBER_LIMIT) {
-    return { code: 'abnormal', reason: `超员（${userCount}/${SPACE_MEMBER_LIMIT}）` }
-  }
-
-  return { code: 'unknown', reason: statusReason || '状态待确认' }
-}
-
-
-const getWorkspaceExpiredReason = () => '到期'
-
-const isTokenInvalidSyncError = (error) => {
-  const status = Number(error?.status ?? error?.statusCode ?? 0)
-  const message = String(error?.message || '').toLowerCase()
-  if (status === 401 || status === 403) return true
-  return /token.*(过期|无效|invalid|expired)|unauthorized|invalid token/.test(message)
-}
-
-
 const hasDuplicateSortOrder = (db) => {
   try {
     const result = db.exec(`
@@ -353,27 +313,6 @@ const rebuildSortOrderByCreatedDesc = (db) => {
     )
   })
   if (ids.length) saveDatabase()
-}
-
-const markAccountSpaceStatus = async (db, accountId, { code, reason = '' } = {}) => {
-  const normalizedInputCode = String(code || '').trim().toLowerCase()
-  const normalizedCode = ['normal', 'abnormal', 'unknown'].includes(normalizedInputCode) ? normalizedInputCode : 'unknown'
-  const normalizedReason = String(reason || '').trim()
-  try {
-    db.run(
-      `
-        UPDATE gpt_accounts
-        SET space_status_code = ?,
-            space_status_reason = ?,
-            updated_at = DATETIME('now', 'localtime')
-        WHERE id = ?
-      `,
-      [normalizedCode, normalizedReason || null, accountId]
-    )
-    saveDatabase()
-  } catch (error) {
-    console.warn('[GptAccounts] skip space status update (legacy schema):', error?.message || error)
-  }
 }
 
 const getAccountById = (db, accountId) => {
@@ -1218,7 +1157,7 @@ router.patch('/:id/space-status', async (req, res) => {
       return res.status(404).json({ error: 'Account not found' })
     }
 
-    await markAccountSpaceStatus(db, accountId, { code, reason })
+    await markAccountSpaceStatus(accountId, { code, reason }, { db })
     const account = getAccountById(db, accountId)
     return res.json({
       message: '空间状态更新成功',
@@ -1366,7 +1305,7 @@ router.post('/:id/sync-user-count', async (req, res) => {
       inviteListParams: { offset: 0, limit: 1, query: '' }
     })
     const db = await getDatabase()
-    await markAccountSpaceStatus(db, accountId, { code: 'normal', reason: '正常' })
+    await markAccountSpaceStatus(accountId, { code: 'normal', reason: '正常' }, { db })
     const protectedEmailSet = await getProtectedSeatEmailSet(db)
     const usersWithProtectionTag = appendProtectedMemberSuffix(userSync.users, protectedEmailSet)
     res.json({
@@ -1387,11 +1326,11 @@ router.post('/:id/sync-user-count', async (req, res) => {
     if (error instanceof AccountSyncError || error.status) {
       if (isTokenInvalidSyncError(error)) {
         const db = await getDatabase()
-        await markAccountSpaceStatus(db, Number(req.params.id), { code: 'abnormal', reason: 'Token 已过期或无效，请更新账号 token' })
+        await markAccountSpaceStatus(Number(req.params.id), { code: 'abnormal', reason: 'Token 已过期或无效，请更新账号 token' }, { db })
       }
       if (isWorkspaceExpiredSyncError(error)) {
         const db = await getDatabase()
-        await markAccountSpaceStatus(db, Number(req.params.id), { code: 'abnormal', reason: getWorkspaceExpiredReason() })
+        await markAccountSpaceStatus(Number(req.params.id), { code: 'abnormal', reason: getWorkspaceExpiredReason() }, { db })
       }
       return res.status(error.status || 500).json({ error: error.message, code: error?.code || null })
     }
