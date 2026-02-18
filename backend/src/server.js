@@ -22,6 +22,7 @@ import adminHistoryExceptionsRoutes from './routes/admin-history-exceptions.js'
 import { initDatabase } from './database/init.js'
 import { startWaitingRoomAutoBoardingScheduler } from './services/waiting-room-auto-boarding.js'
 import { startOpenAccountsOvercapacitySweeper } from './services/open-accounts-sweeper.js'
+import { startOpenAccountsNightlySyncScheduler } from './services/open-accounts-nightly-sync.js'
 import { startOrderExpirationSweeper } from './services/order-expiration-sweeper.js'
 import { startCreditOrderActionSweeper } from './services/credit-order-action-sweeper.js'
 import { startTelegramBot } from './services/telegram-bot.js'
@@ -103,6 +104,7 @@ initDatabase()
 
 	    startWaitingRoomAutoBoardingScheduler()
 	    startOpenAccountsOvercapacitySweeper()
+	    startOpenAccountsNightlySyncScheduler()
 	    startOrderExpirationSweeper()
 	    startCreditOrderActionSweeper()
 	    await startTelegramBot().catch(error => {
