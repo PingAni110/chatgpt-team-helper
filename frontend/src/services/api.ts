@@ -1456,6 +1456,11 @@ export const historyExceptionService = {
     const response = await api.put(`/admin/history-exceptions/${accountId}/status`, { status })
     return response.data
   },
+
+  async remove(accountId: number): Promise<{ accountId: number; deleted: boolean }> {
+    const response = await api.delete(`/admin/history-exceptions/${accountId}`)
+    return response.data
+  },
 }
 
 export const configService = {
