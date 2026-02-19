@@ -11,6 +11,7 @@ const { initDatabase, getDatabase } = await import('../src/database/init.js')
 const {
   mapOpenAccountsSweeperExceptionCode,
   upsertOpenAccountsSweeperException,
+  upsertOvercapacityHistory,
 } = await import('../src/services/open-accounts-sweeper.js')
 
 await initDatabase()
@@ -89,5 +90,61 @@ rows = db.exec("SELECT source, reason FROM account_exception_parse_failures WHER
 assert.equal(rows[0]?.values?.length, 1)
 assert.equal(rows[0].values[0][0], 'open_accounts_sweeper')
 assert.equal(rows[0].values[0][1], 'missing_account_id')
+
+
+
+// 超员检测/已处理/未处理都应写入历史异常
+await upsertOvercapacityHistory(
+  {
+    accountId: 302,
+    accountName: 'open-302',
+    stage: 'detected',
+    beforeJoined: 62,
+    joined: 62,
+    maxJoinedCount: 60,
+  },
+  { db, skipSave: true, now: "DATETIME('2024-01-04 10:00:00')" }
+)
+
+rows = db.exec('SELECT exception_type, exception_code, status, exception_message FROM account_exception_history WHERE account_id = 302')
+assert.equal(rows[0].values[0][0], 'open_account_overcapacity')
+assert.equal(rows[0].values[0][1], 'overcapacity_detected')
+assert.equal(rows[0].values[0][2], 'active')
+assert.match(String(rows[0].values[0][3]), /检测到超员/)
+
+await upsertOvercapacityHistory(
+  {
+    accountId: 302,
+    accountName: 'open-302',
+    stage: 'resolved',
+    beforeJoined: 62,
+    joined: 60,
+    maxJoinedCount: 60,
+  },
+  { db, skipSave: true, now: "DATETIME('2024-01-04 10:05:00')" }
+)
+
+rows = db.exec('SELECT exception_code, status, exception_message FROM account_exception_history WHERE account_id = 302')
+assert.equal(rows[0].values[0][0], 'overcapacity_resolved')
+assert.equal(rows[0].values[0][1], 'resolved')
+assert.match(String(rows[0].values[0][2]), /超员已处理/)
+
+await upsertOvercapacityHistory(
+  {
+    accountId: 302,
+    accountName: 'open-302',
+    stage: 'active',
+    beforeJoined: 62,
+    joined: 61,
+    maxJoinedCount: 60,
+    reason: 'no_standard_users',
+  },
+  { db, skipSave: true, now: "DATETIME('2024-01-04 10:10:00')" }
+)
+
+rows = db.exec('SELECT exception_code, status, exception_message FROM account_exception_history WHERE account_id = 302')
+assert.equal(rows[0].values[0][0], 'overcapacity_active')
+assert.equal(rows[0].values[0][1], 'active')
+assert.match(String(rows[0].values[0][2]), /无可踢用户/)
 
 console.log('open-accounts-sweeper-exception tests passed')

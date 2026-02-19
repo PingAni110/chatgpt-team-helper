@@ -37,6 +37,12 @@ const createdWithinDays = () => Math.max(0, toInt(process.env.OPEN_ACCOUNTS_SWEE
 
 const OPEN_ACCOUNTS_SWEEPER_SOURCE = 'open_accounts_sweeper'
 const OPEN_ACCOUNTS_SWEEPER_EXCEPTION_TYPE = 'open_account_sweeper_failure'
+const OPEN_ACCOUNTS_OVERCAPACITY_EXCEPTION_TYPE = 'open_account_overcapacity'
+const OVERCAPACITY_STAGE = {
+  DETECTED: 'detected',
+  RESOLVED: 'resolved',
+  ACTIVE: 'active',
+}
 
 export const mapOpenAccountsSweeperExceptionCode = ({ status, stage } = {}) => {
   const numericStatus = Number.parseInt(String(status ?? ''), 10)
@@ -77,6 +83,47 @@ export const upsertOpenAccountsSweeperException = async (
     exceptionMessage: String(exceptionMessage || '').trim() || 'Open 账号扫描失败',
     source: OPEN_ACCOUNTS_SWEEPER_SOURCE,
     status: 'active',
+  }, options)
+}
+
+export const upsertOvercapacityHistory = async ({
+  accountId,
+  accountName,
+  stage,
+  beforeJoined,
+  joined,
+  maxJoinedCount,
+  reason,
+  failedUsers,
+} = {}, options = {}) => {
+  const normalizedStage = String(stage || '').trim().toLowerCase()
+  let status = 'active'
+  let message = `检测到超员：${beforeJoined}/${maxJoinedCount}`
+
+  if (normalizedStage === OVERCAPACITY_STAGE.RESOLVED) {
+    status = 'resolved'
+    message = `超员已处理：${beforeJoined}/${maxJoinedCount} -> ${joined}/${maxJoinedCount}`
+  } else if (normalizedStage === OVERCAPACITY_STAGE.ACTIVE) {
+    status = 'active'
+    if (reason === 'no_standard_users') {
+      message = `超员未处理：无可踢用户（${joined}/${maxJoinedCount}）`
+    } else if ((failedUsers || []).length > 0) {
+      const firstFailed = failedUsers[0] || {}
+      const failedMessage = String(firstFailed.message || '').trim()
+      message = `超员未处理：${failedMessage || '踢人失败'}（${joined}/${maxJoinedCount}）`
+    } else {
+      message = `超员未处理：仍超上限（${joined}/${maxJoinedCount}）`
+    }
+  }
+
+  return upsertAccountExceptionHistory({
+    accountId,
+    accountName,
+    exceptionType: OPEN_ACCOUNTS_OVERCAPACITY_EXCEPTION_TYPE,
+    exceptionCode: `overcapacity_${normalizedStage || OVERCAPACITY_STAGE.DETECTED}`,
+    exceptionMessage: message,
+    source: OPEN_ACCOUNTS_SWEEPER_SOURCE,
+    status,
   }, options)
 }
 
@@ -363,6 +410,43 @@ export const startOpenAccountsOvercapacitySweeper = () => {
                   kickedUsers: outcome?.kickedUsers || [],
                   failedUsers: outcome?.failedUsers || []
                 })
+              }
+
+              if (beforeJoined > max) {
+                await upsertOvercapacityHistory({
+                  accountId: id,
+                  accountName: emailPrefix,
+                  stage: OVERCAPACITY_STAGE.DETECTED,
+                  beforeJoined,
+                  joined,
+                  maxJoinedCount: max,
+                  reason: outcome?.reason,
+                  failedUsers: outcome?.failedUsers || [],
+                })
+
+                if (joined <= max) {
+                  await upsertOvercapacityHistory({
+                    accountId: id,
+                    accountName: emailPrefix,
+                    stage: OVERCAPACITY_STAGE.RESOLVED,
+                    beforeJoined,
+                    joined,
+                    maxJoinedCount: max,
+                    reason: outcome?.reason,
+                    failedUsers: outcome?.failedUsers || [],
+                  })
+                } else {
+                  await upsertOvercapacityHistory({
+                    accountId: id,
+                    accountName: emailPrefix,
+                    stage: OVERCAPACITY_STAGE.ACTIVE,
+                    beforeJoined,
+                    joined,
+                    maxJoinedCount: max,
+                    reason: outcome?.reason,
+                    failedUsers: outcome?.failedUsers || [],
+                  })
+                }
               }
 
               if ((outcome?.failedUsers || []).length > 0) {

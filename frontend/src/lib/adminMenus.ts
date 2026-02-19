@@ -65,6 +65,7 @@ const ICONS_BY_MENU_KEY: Record<string, any> = {
   history_exceptions: AlertTriangle,
   'history_exception:view': AlertTriangle,
   'history_exception:update': AlertTriangle,
+  'history_exception:delete': AlertTriangle,
 }
 
 const FALLBACK_ADMIN_MENU_TREE: AdminMenuDraftNode[] = [

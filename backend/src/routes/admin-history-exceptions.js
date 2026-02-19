@@ -171,4 +171,27 @@ router.put('/history-exceptions/:accountId/status', authenticateToken, requireMe
   }
 })
 
+router.delete('/history-exceptions/:accountId', authenticateToken, requireMenu('history_exception:delete'), async (req, res) => {
+  try {
+    const accountId = Number.parseInt(String(req.params.accountId || '').trim(), 10)
+    if (!Number.isFinite(accountId) || accountId <= 0) {
+      return res.status(400).json({ error: '无效的 accountId' })
+    }
+
+    const db = await getDatabase()
+    const exists = db.exec('SELECT 1 FROM account_exception_history WHERE account_id = ? LIMIT 1', [accountId])
+    if (!exists[0]?.values?.length) {
+      return res.status(404).json({ error: '记录不存在' })
+    }
+
+    db.run('DELETE FROM account_exception_history WHERE account_id = ?', [accountId])
+    await saveDatabase()
+
+    res.json({ accountId, deleted: true })
+  } catch (error) {
+    console.error('[HistoryException] delete error:', error)
+    res.status(500).json({ error: '删除历史异常失败' })
+  }
+})
+
 export default router

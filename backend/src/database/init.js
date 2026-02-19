@@ -304,6 +304,7 @@ const ensureRbacTables = (database) => {
       { key: 'history_exceptions', label: '历史异常', path: '/admin/history-exceptions', sortOrder: 12 },
       { key: 'history_exception:view', label: '历史异常查看权限', path: '', sortOrder: 9001, isActive: 0 },
       { key: 'history_exception:update', label: '历史异常更新权限', path: '', sortOrder: 9002, isActive: 0 },
+      { key: 'history_exception:delete', label: '历史异常删除权限', path: '', sortOrder: 9003, isActive: 0 },
       { key: 'waiting_room', label: '候车室管理', path: '/admin/waiting-room', sortOrder: 99, isActive: 0 },
     ]
 
@@ -444,7 +445,7 @@ const ensureRbacTables = (database) => {
     // 角色授权迁移：历史具备“补号管理”的角色，自动补齐历史异常菜单和权限点
     try {
       const sourceMenuId = resolveMenuIdByKey('account_recovery')
-      const migrationTargets = ['history_exceptions', 'history_exception:view', 'history_exception:update']
+      const migrationTargets = ['history_exceptions', 'history_exception:view', 'history_exception:update', 'history_exception:delete']
         .map(resolveMenuIdByKey)
         .filter(Boolean)
 
