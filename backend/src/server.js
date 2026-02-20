@@ -30,7 +30,6 @@ import { startXianyuLoginRefreshScheduler } from './services/xianyu-login-refres
 import { startXhsAutoSyncScheduler } from './services/xhs-auto-sync.js'
 import { startXianyuWsDeliveryBot } from './services/xianyu-ws-delivery.js'
 import { getInsecureDefaultJwtSecret } from './utils/env-secrets.js'
-import { validateOpenAIOAuthConfig } from './services/openai-oauth-config.js'
 
 dotenv.config()
 
@@ -45,14 +44,6 @@ if (isProduction) {
     console.error('[SECURITY] JWT_SECRET must be set to a strong random value in production')
     process.exit(1)
   }
-}
-
-
-try {
-  validateOpenAIOAuthConfig({ productionOnly: true })
-} catch (error) {
-  console.error('[SECURITY] OpenAI OAuth 配置校验失败:', error?.message || error)
-  process.exit(1)
 }
 
 const startServer = () => {

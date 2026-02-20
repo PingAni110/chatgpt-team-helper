@@ -330,30 +330,6 @@ const extractOAuthCode = (value: string): string => {
   return raw
 }
 
-const extractOAuthState = (value: string): string => {
-  const raw = String(value || '').trim()
-  if (!raw) return ''
-
-  try {
-    const url = new URL(raw)
-    const state = url.searchParams.get('state')
-    if (state) return state
-  } catch {
-    // ignore
-  }
-
-  const match = raw.match(/[?&]state=([^&#]+)/)
-  if (match?.[1]) {
-    try {
-      return decodeURIComponent(match[1])
-    } catch {
-      return match[1]
-    }
-  }
-
-  return ''
-}
-
 const generateOpenaiAuthUrl = async () => {
   const currentNonce = openaiOAuthFlowNonce
   openaiOAuthError.value = ''
@@ -390,7 +366,7 @@ const generateOpenaiAuthUrl = async () => {
 
 const handleClickGetRefreshToken = async () => {
   showOpenaiOAuthPanel.value = true
-  if (openaiOAuthSession.value?.authUrl && openaiOAuthSession.value?.state) return
+  if (openaiOAuthSession.value?.authUrl && openaiOAuthSession.value?.sessionId) return
   await generateOpenaiAuthUrl()
 }
 
@@ -407,15 +383,13 @@ const handleOpenAuthUrl = () => {
 
 const handleExchangeOpenaiCode = async () => {
   const currentNonce = openaiOAuthFlowNonce
-  const fallbackState = String(openaiOAuthSession.value?.state || '').trim()
-  if (!fallbackState) {
+  const sessionId = String(openaiOAuthSession.value?.sessionId || '').trim()
+  if (!sessionId) {
     showErrorToast('请先点击“获取”生成授权链接')
     return
   }
 
   const code = extractOAuthCode(openaiOAuthInput.value)
-  const parsedState = extractOAuthState(openaiOAuthInput.value)
-  const state = parsedState || fallbackState
   if (!code) {
     showErrorToast('请粘贴回调 URL 或授权码（code）')
     return
@@ -432,7 +406,7 @@ const handleExchangeOpenaiCode = async () => {
   try {
     exchangingOpenaiCode.value = true
     openaiOAuthError.value = ''
-    const result = await openaiOAuthService.exchangeCode(apiKey, { code, state })
+    const result = await openaiOAuthService.exchangeCode(apiKey, { code, sessionId })
     if (currentNonce !== openaiOAuthFlowNonce) return
     openaiOAuthResult.value = result
 
@@ -1883,7 +1857,7 @@ const handleInviteSubmit = async () => {
                     <Button
                       type="button"
                       class="h-11 rounded-xl"
-                      :disabled="exchangingOpenaiCode || !openaiOAuthInput.trim() || !openaiOAuthSession?.state"
+                      :disabled="exchangingOpenaiCode || !openaiOAuthInput.trim() || !openaiOAuthSession?.sessionId"
                       @click="handleExchangeOpenaiCode"
                     >
                       <template v-if="exchangingOpenaiCode">
