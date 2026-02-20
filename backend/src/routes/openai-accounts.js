@@ -2,92 +2,72 @@ import express from 'express'
 import crypto from 'crypto'
 import axios from 'axios'
 import { apiKeyAuth } from '../middleware/api-key-auth.js'
-import { setOAuthSession, getOAuthSession, deleteOAuthSession } from '../services/oauth-session-store.js'
+import { consumeOAuthSessionByState, setOAuthSession } from '../services/oauth-session-store.js'
+import { getOpenAIOAuthConfig, hashRedirectUri } from '../services/openai-oauth-config.js'
+import { incMetric, getMetricsSnapshot } from '../services/openai-oauth-metrics.js'
 
 const router = express.Router()
-
-const OPENAI_CONFIG = {
-  BASE_URL: process.env.OPENAI_BASE_URL || 'https://auth.openai.com',
-  CLIENT_ID: process.env.OPENAI_CLIENT_ID || 'app_EMoamEEZ73f0CkXaXp7hrann',
-  REDIRECT_URI: process.env.OPENAI_REDIRECT_URI || 'http://localhost:1455/auth/callback',
-  SCOPE: process.env.OPENAI_SCOPE || 'openid profile email offline_access'
-}
+const OPENAI_CONFIG = getOpenAIOAuthConfig()
 
 function parseProxyConfig(proxyUrl) {
   if (!proxyUrl) return null
-
   try {
     const parsed = new URL(proxyUrl)
-    if (!parsed.hostname) {
-      return null
-    }
-
-    const port = parsed.port ? Number(parsed.port) : parsed.protocol === 'https:' ? 443 : 80
-
-    const auth = parsed.username
-      ? {
-          username: decodeURIComponent(parsed.username),
-          password: decodeURIComponent(parsed.password || '')
-        }
-      : undefined
-
+    if (!parsed.hostname) return null
     return {
       protocol: parsed.protocol?.replace(':', '') || 'http',
       host: parsed.hostname,
-      port,
-      auth
+      port: parsed.port ? Number(parsed.port) : parsed.protocol === 'https:' ? 443 : 80,
+      auth: parsed.username
+        ? { username: decodeURIComponent(parsed.username), password: decodeURIComponent(parsed.password || '') }
+        : undefined
     }
-  } catch (error) {
-    console.warn('Invalid proxy url provided for OpenAI OAuth:', error.message)
+  } catch {
     return null
   }
 }
 
 function decodeJwtPayload(token) {
   const parts = token.split('.')
-  if (parts.length !== 3) {
-    throw new Error('Invalid ID token format')
-  }
-
+  if (parts.length !== 3) throw new Error('Invalid ID token format')
   const payloadSegment = parts[1].replace(/-/g, '+').replace(/_/g, '/')
   const paddedPayload = payloadSegment.padEnd(Math.ceil(payloadSegment.length / 4) * 4, '=')
-  const decoded = Buffer.from(paddedPayload, 'base64').toString('utf-8')
-  return JSON.parse(decoded)
+  return JSON.parse(Buffer.from(paddedPayload, 'base64').toString('utf-8'))
 }
 
 function generateOpenAIPKCE() {
   const codeVerifier = crypto.randomBytes(64).toString('hex')
   const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url')
-
   return { codeVerifier, codeChallenge }
+}
+
+function classifyExchangeError(status, upstreamCode) {
+  const businessCodes = new Set(['invalid_grant', 'invalid_request', 'invalid_client', 'invalid_scope', 'unauthorized_client'])
+  if (businessCodes.has(String(upstreamCode || ''))) return status && status >= 400 && status < 500 ? status : 400
+  return 500
 }
 
 router.post('/generate-auth-url', apiKeyAuth, async (req, res) => {
   try {
     if (!OPENAI_CONFIG.REDIRECT_URI) {
-      return res.status(500).json({
-        success: false,
-        message: 'OPENAI_REDIRECT_URI 未配置，无法生成授权链接'
-      })
+      return res.status(500).json({ success: false, message: 'OPENAI_REDIRECT_URI 未配置，无法生成授权链接' })
     }
 
-    const { proxy } = req.body || {}
-
+    const { proxy, accountIdentifier } = req.body || {}
     const pkce = generateOpenAIPKCE()
     const state = crypto.randomBytes(32).toString('hex')
-    const sessionId = crypto.randomUUID()
+    const nonce = crypto.randomBytes(8).toString('hex')
+    const normalizedAccountIdentifier = String(accountIdentifier || 'unknown').trim() || 'unknown'
+    const sessionKey = `openai:pkce:${normalizedAccountIdentifier}:${nonce}`
 
-    const createdAt = new Date()
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000)
-
-    setOAuthSession(sessionId, {
+    await setOAuthSession({
+      sessionKey,
       codeVerifier: pkce.codeVerifier,
       codeChallenge: pkce.codeChallenge,
       state,
-      proxy: proxy || null,
-      platform: 'openai',
-      createdAt: createdAt.toISOString(),
-      expiresAt: expiresAt.toISOString()
+      nonce,
+      accountIdentifier: normalizedAccountIdentifier,
+      proxy: proxy || null
     })
 
     const params = new URLSearchParams({
@@ -102,126 +82,68 @@ router.post('/generate-auth-url', apiKeyAuth, async (req, res) => {
       codex_cli_simplified_flow: 'true'
     })
 
-    const authUrl = `${OPENAI_CONFIG.BASE_URL}/oauth/authorize?${params.toString()}`
-
-    console.log(`🔗 Generated OpenAI OAuth authorization URL for session ${sessionId}`)
-
     return res.json({
       success: true,
       data: {
-        authUrl,
-        sessionId,
-        instructions: [
-          '1. 复制上面的链接到浏览器中打开',
-          '2. 登录您的 OpenAI 账户',
-          '3. 同意应用权限',
-          '4. 复制浏览器地址栏中的完整 URL（包含 code 参数）',
-          '5. 在添加账户表单中粘贴完整的回调 URL'
-        ]
+        authUrl: `${OPENAI_CONFIG.BASE_URL}/oauth/authorize?${params.toString()}`,
+        state,
+        sessionKey,
+        instructions: ['1. 浏览器打开授权链接', '2. 完成登录与授权', '3. 复制回调 URL（含 code 和 state）', '4. 粘贴到输入框完成交换']
       }
     })
   } catch (error) {
-    console.error('生成 OpenAI OAuth URL 失败:', error)
-    return res.status(500).json({
-      success: false,
-      message: '生成授权链接失败',
-      error: error.message
-    })
+    return res.status(500).json({ success: false, message: '生成授权链接失败', error: error.message })
   }
 })
 
 router.post('/exchange-code', apiKeyAuth, async (req, res) => {
+  const requestId = crypto.randomUUID()
   try {
-    const { code, sessionId } = req.body || {}
-
-    if (!code || !sessionId) {
-      return res.status(400).json({
-        success: false,
-        message: '缺少必要参数'
-      })
+    const { code, state } = req.body || {}
+    if (!code || !state) {
+      incMetric('exchangeCodeFailure')
+      return res.status(400).json({ success: false, message: '缺少必要参数 code/state' })
     }
 
     if (!OPENAI_CONFIG.REDIRECT_URI) {
-      return res.status(500).json({
-        success: false,
-        message: 'OPENAI_REDIRECT_URI 未配置，无法交换授权码'
-      })
+      incMetric('exchangeCodeFailure')
+      return res.status(500).json({ success: false, message: 'OPENAI_REDIRECT_URI 未配置，无法交换授权码' })
     }
 
-    const sessionData = getOAuthSession(sessionId)
-    if (!sessionData) {
-      return res.status(400).json({
-        success: false,
-        message: '会话已过期或无效'
-      })
-    }
-
-    if (!sessionData.codeVerifier) {
-      return res.status(400).json({
-        success: false,
-        message: '会话缺少验证信息，请重新生成授权链接'
-      })
+    const sessionData = await consumeOAuthSessionByState(state)
+    if (!sessionData?.codeVerifier) {
+      incMetric('exchangeCodeFailure')
+      return res.status(400).json({ success: false, message: 'state 无效、过期或已使用' })
     }
 
     const tokenPayload = new URLSearchParams({
       grant_type: 'authorization_code',
       code: String(code).trim(),
-      redirect_uri: OPENAI_CONFIG.REDIRECT_URI,
       client_id: OPENAI_CONFIG.CLIENT_ID,
+      redirect_uri: OPENAI_CONFIG.REDIRECT_URI,
       code_verifier: sessionData.codeVerifier
     }).toString()
 
     const axiosConfig = {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       timeout: 60000
     }
-
     const proxyConfig = parseProxyConfig(sessionData.proxy)
-    if (proxyConfig) {
-      axiosConfig.proxy = proxyConfig
-    }
+    if (proxyConfig) axiosConfig.proxy = proxyConfig
 
-    console.log('Exchanging OpenAI authorization code', {
-      sessionId,
-      hasProxy: !!proxyConfig,
-      codeLength: String(code).length
-    })
-
-    const tokenResponse = await axios.post(
-      `${OPENAI_CONFIG.BASE_URL}/oauth/token`,
-      tokenPayload,
-      axiosConfig
-    )
-
+    const tokenResponse = await axios.post(`${OPENAI_CONFIG.BASE_URL}/oauth/token`, tokenPayload, axiosConfig)
     const { id_token: idToken, access_token: accessToken, refresh_token: refreshToken, expires_in: expiresIn } = tokenResponse.data || {}
-
-    if (!idToken || !accessToken) {
-      throw new Error('未返回有效的授权令牌')
-    }
+    if (!idToken || !accessToken) throw new Error('未返回有效的授权令牌')
 
     const payload = decodeJwtPayload(idToken)
     const authClaims = payload['https://api.openai.com/auth'] || {}
     const organizations = authClaims.organizations || []
     const defaultOrg = organizations.find(org => org.is_default) || organizations[0] || {}
 
-    deleteOAuthSession(sessionId)
-
-    console.log('✅ OpenAI OAuth token exchange successful', {
-      sessionId,
-      accountId: authClaims.chatgpt_account_id
-    })
-
     return res.json({
       success: true,
       data: {
-        tokens: {
-          idToken,
-          accessToken,
-          refreshToken,
-          expiresIn: expiresIn || 0
-        },
+        tokens: { idToken, accessToken, refreshToken, expiresIn: expiresIn || 0 },
         accountInfo: {
           accountId: authClaims.chatgpt_account_id || '',
           chatgptUserId: authClaims.chatgpt_user_id || authClaims.user_id || '',
@@ -237,13 +159,33 @@ router.post('/exchange-code', apiKeyAuth, async (req, res) => {
       }
     })
   } catch (error) {
-    console.error('OpenAI OAuth token exchange failed:', error)
-    return res.status(500).json({
+    const upstreamStatus = Number(error?.response?.status || 0) || null
+    const upstreamError = String(error?.response?.data?.error || '') || null
+    const upstreamDescription = String(error?.response?.data?.error_description || '') || null
+    const status = classifyExchangeError(upstreamStatus, upstreamError)
+    incMetric('exchangeCodeFailure')
+    if (upstreamError === 'invalid_grant') incMetric('exchangeCodeInvalidGrant')
+
+    console.error('[OpenAI OAuth exchange] 失败', {
+      requestId,
+      upstreamStatus,
+      error: upstreamError,
+      errorDescription: upstreamDescription,
+      redirectUriHash: hashRedirectUri(OPENAI_CONFIG.REDIRECT_URI),
+      hasCodeVerifier: true
+    })
+
+    return res.status(status).json({
       success: false,
-      message: '交换授权码失败',
-      error: error.message
+      message: status >= 500 ? '交换授权码失败' : '授权参数无效或授权码已失效',
+      error: upstreamError || error.message,
+      error_description: upstreamDescription
     })
   }
+})
+
+router.get('/oauth-metrics', apiKeyAuth, async (_req, res) => {
+  res.json({ success: true, data: getMetricsSnapshot() })
 })
 
 export default router

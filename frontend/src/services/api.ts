@@ -1614,7 +1614,8 @@ export const gptAccountService = {
 
 export interface OpenAIOAuthSession {
   authUrl: string
-  sessionId: string
+  state: string
+  sessionKey: string
   instructions?: string[]
 }
 
@@ -1654,7 +1655,7 @@ export const openaiOAuthService = {
     return response.data.data as OpenAIOAuthSession
   },
 
-  async exchangeCode(apiKey: string, payload: { code: string; sessionId: string }): Promise<OpenAIOAuthExchangeResult> {
+  async exchangeCode(apiKey: string, payload: { code: string; state: string }): Promise<OpenAIOAuthExchangeResult> {
     const response = await api.post('/openai-accounts/exchange-code', payload, {
       headers: {
         'x-api-key': apiKey,

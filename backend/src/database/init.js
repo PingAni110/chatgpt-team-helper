@@ -1610,6 +1610,66 @@ const ensureAccountExceptionHistoryTable = (database) => {
   return changed
 }
 
+
+const ensureOauthPkceSessionsTable = (database) => {
+  let changed = false
+  const existed = tableExists(database, 'oauth_pkce_sessions')
+  database.run(`
+    CREATE TABLE IF NOT EXISTS oauth_pkce_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_key TEXT NOT NULL,
+      state TEXT NOT NULL,
+      code_verifier TEXT NOT NULL,
+      code_challenge TEXT,
+      proxy TEXT,
+      account_identifier TEXT,
+      nonce TEXT,
+      consumed_at DATETIME,
+      created_at DATETIME DEFAULT (DATETIME('now', 'localtime')),
+      expires_at DATETIME NOT NULL
+    )
+  `)
+  if (!existed) changed = true
+  database.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_pkce_sessions_state ON oauth_pkce_sessions(state)')
+  database.run('CREATE INDEX IF NOT EXISTS idx_oauth_pkce_sessions_expires_at ON oauth_pkce_sessions(expires_at)')
+  database.run('CREATE INDEX IF NOT EXISTS idx_oauth_pkce_sessions_session_key ON oauth_pkce_sessions(session_key)')
+
+  const lockTableExists = tableExists(database, 'distributed_locks')
+  database.run(`
+    CREATE TABLE IF NOT EXISTS distributed_locks (
+      lock_key TEXT PRIMARY KEY,
+      lock_value TEXT NOT NULL,
+      expires_at_epoch INTEGER NOT NULL,
+      created_at DATETIME DEFAULT (DATETIME('now', 'localtime'))
+    )
+  `)
+  if (!lockTableExists) changed = true
+  database.run('CREATE INDEX IF NOT EXISTS idx_distributed_locks_expires_at ON distributed_locks(expires_at_epoch)')
+
+  const cacheTableExists = tableExists(database, 'distributed_cache')
+  database.run(`
+    CREATE TABLE IF NOT EXISTS distributed_cache (
+      cache_key TEXT PRIMARY KEY,
+      payload_json TEXT NOT NULL,
+      expires_at_epoch INTEGER NOT NULL,
+      created_at DATETIME DEFAULT (DATETIME('now', 'localtime'))
+    )
+  `)
+  if (!cacheTableExists) changed = true
+  database.run('CREATE INDEX IF NOT EXISTS idx_distributed_cache_expires_at ON distributed_cache(expires_at_epoch)')
+
+  if (tableExists(database, 'gpt_accounts')) {
+    const cols = getTableColumns(database, 'gpt_accounts')
+    if (!cols.has('token_version')) {
+      database.run('ALTER TABLE gpt_accounts ADD COLUMN token_version INTEGER DEFAULT 0')
+      changed = true
+      console.log('已添加 token_version 列到 gpt_accounts 表')
+    }
+  }
+
+  return changed
+}
+
 // 获取数据库路径（优先使用环境变量，否则使用默认路径）
 function getDatabasePath() {
   if (process.env.DATABASE_PATH) {
@@ -1686,7 +1746,8 @@ export async function initDatabase() {
         const pointsLedgerCreated = ensurePointsLedgerTable(database)
         const accountExceptionHistoryCreated = ensureAccountExceptionHistoryTable(database)
         const rbacInitialized = ensureRbacTables(database)
-        if (waitingRoomCreated || openAccountSeatProtectionsCreated || xhsTablesCreated || xianyuTablesCreated || linuxDoUsersCreated || accountRecoveryCreated || purchaseOrdersCreated || creditOrdersCreated || pointsWithdrawalsCreated || pointsLedgerCreated || accountExceptionHistoryCreated || rbacInitialized) {
+        const oauthPkceInitialized = ensureOauthPkceSessionsTable(database)
+        if (waitingRoomCreated || openAccountSeatProtectionsCreated || xhsTablesCreated || xianyuTablesCreated || linuxDoUsersCreated || accountRecoveryCreated || purchaseOrdersCreated || creditOrdersCreated || pointsWithdrawalsCreated || pointsLedgerCreated || accountExceptionHistoryCreated || rbacInitialized || oauthPkceInitialized) {
           saveDatabase()
         }
 
@@ -1712,6 +1773,12 @@ export async function initDatabase() {
             if (!columns.includes('refresh_token')) {
               database.run('ALTER TABLE gpt_accounts ADD COLUMN refresh_token TEXT')
               console.log('已添加 refresh_token 列到 gpt_accounts 表')
+              saveDatabase()
+            }
+
+            if (!columns.includes('token_version')) {
+              database.run('ALTER TABLE gpt_accounts ADD COLUMN token_version INTEGER DEFAULT 0')
+              console.log('已添加 token_version 列到 gpt_accounts 表')
               saveDatabase()
             }
 
@@ -1915,7 +1982,8 @@ export async function initDatabase() {
 	      space_status_code TEXT DEFAULT 'normal',
 	      space_status_reason TEXT,
 	      created_at DATETIME DEFAULT (DATETIME('now', 'localtime')),
-	      updated_at DATETIME DEFAULT (DATETIME('now', 'localtime'))
+	      updated_at DATETIME DEFAULT (DATETIME('now', 'localtime')),
+	      token_version INTEGER DEFAULT 0
 	    )
 	  `)
 
@@ -1953,7 +2021,9 @@ export async function initDatabase() {
   const pointsWithdrawalsInitialized = ensurePointsWithdrawalsTable(database)
   const pointsLedgerInitialized = ensurePointsLedgerTable(database)
   const accountExceptionHistoryInitialized = ensureAccountExceptionHistoryTable(database)
-  if (waitingRoomInitialized || openAccountSeatProtectionsInitialized || xhsTablesInitialized || xianyuTablesInitialized || linuxDoUsersInitialized || accountRecoveryInitialized || purchaseOrdersInitialized || creditOrdersInitialized || pointsWithdrawalsInitialized || pointsLedgerInitialized || accountExceptionHistoryInitialized) {
+  const rbacInitialized = ensureRbacTables(database)
+  const oauthPkceInitialized = ensureOauthPkceSessionsTable(database)
+  if (waitingRoomInitialized || openAccountSeatProtectionsInitialized || xhsTablesInitialized || xianyuTablesInitialized || linuxDoUsersInitialized || accountRecoveryInitialized || purchaseOrdersInitialized || creditOrdersInitialized || pointsWithdrawalsInitialized || pointsLedgerInitialized || accountExceptionHistoryInitialized || rbacInitialized || oauthPkceInitialized) {
     saveDatabase()
   }
 

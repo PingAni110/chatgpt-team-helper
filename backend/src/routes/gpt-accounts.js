@@ -9,6 +9,8 @@ import { SPACE_MEMBER_LIMIT, calcRedeemableSlots, normalizeMemberCount } from '.
 import { getWorkspaceExpiredReason, isTokenInvalidSyncError, markAccountSpaceStatus, resolveSpaceStatus } from '../services/account-space-status.js'
 import { SPACE_TYPE_CHILD, normalizeSpaceType, shouldAutoGenerateCodes } from '../utils/space-type.js'
 import { withLocks } from '../utils/locks.js'
+import { acquireLock, getJsonCache, setJsonCache } from '../services/distributed-lock.js'
+import { incMetric } from '../services/openai-oauth-metrics.js'
 
 const router = express.Router()
 const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
@@ -1444,29 +1446,59 @@ router.delete('/:id/invites', async (req, res) => {
 
 // 刷新账号的 access token
 router.post('/:id/refresh-token', async (req, res) => {
+  const accountId = Number(req.params.id)
+  const lockKey = `openai:refresh:lock:${accountId}`
+  const resultCacheKey = `openai:refresh:result:${accountId}`
+  const lockValue = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  let release = async () => {}
+
   try {
-    const db = await getDatabase()
+    const lockResult = await acquireLock(lockKey, lockValue, 30)
+    release = lockResult.release || release
 
-	    const result = db.exec(
-	      `SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
-	              COALESCE(is_demoted, 0) AS is_demoted,
-	              COALESCE(is_banned, 0) AS is_banned,
-	              COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
-	              created_at, updated_at
-	       FROM gpt_accounts WHERE id = ?`,
-	      [req.params.id]
-	    )
+    if (!lockResult.acquired) {
+      incMetric('refreshLockConflict')
+      const cached = await getJsonCache(resultCacheKey)
+      if (cached) {
+        return res.json(cached)
+      }
 
-    if (result.length === 0 || result[0].values.length === 0) {
-      return res.status(404).json({ error: '账号不存在' })
+      const db = await getDatabase()
+      const latest = db.exec(
+        `SELECT id, token, refresh_token, updated_at FROM gpt_accounts WHERE id = ? LIMIT 1`,
+        [accountId]
+      )
+      if (latest[0]?.values?.length) {
+        const row = latest[0].values[0]
+        return res.status(202).json({
+          message: '刷新进行中，返回最新持久化 token',
+          accountId: row[0],
+          accessToken: row[1],
+          refreshToken: row[2],
+          updatedAt: row[3]
+        })
+      }
+      return res.status(409).json({ error: '刷新冲突，请稍后重试' })
     }
+
+    const db = await getDatabase()
+    const result = db.exec(
+      `SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
+              COALESCE(is_demoted, 0) AS is_demoted,
+              COALESCE(is_banned, 0) AS is_banned,
+              COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
+              created_at, updated_at,
+              COALESCE(token_version, 0) AS token_version
+       FROM gpt_accounts WHERE id = ?`,
+      [accountId]
+    )
+
+    if (result.length === 0 || result[0].values.length === 0) return res.status(404).json({ error: '账号不存在' })
 
     const row = result[0].values[0]
     const refreshToken = row[3]
-
-    if (!refreshToken) {
-      return res.status(400).json({ error: '该账号未配置 refresh token' })
-    }
+    const currentVersion = Number(row[15]) || 0
+    if (!refreshToken) return res.status(400).json({ error: '该账号未配置 refresh token' })
 
     const requestData = new URLSearchParams({
       grant_type: 'refresh_token',
@@ -1475,85 +1507,68 @@ router.post('/:id/refresh-token', async (req, res) => {
       scope: 'openid profile email'
     }).toString()
 
-    const requestOptions = {
+    const response = await axios({
       method: 'POST',
       url: 'https://auth.openai.com/oauth/token',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': requestData.length
-      },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': requestData.length },
       data: requestData,
       timeout: 60000
-    }
+    })
 
-    const response = await axios(requestOptions)
-
-    if (response.status !== 200 || !response.data?.access_token) {
-      return res.status(500).json({ error: '刷新 token 失败，未返回有效凭证' })
-    }
+    if (response.status !== 200 || !response.data?.access_token) return res.status(500).json({ error: '刷新 token 失败，未返回有效凭证' })
 
     const resultData = response.data
+    const rotatedRefreshToken = resultData.refresh_token || refreshToken
 
     db.run(
-      `UPDATE gpt_accounts SET token = ?, refresh_token = ?, updated_at = DATETIME('now', 'localtime') WHERE id = ?`,
-      [resultData.access_token, resultData.refresh_token || refreshToken, req.params.id]
+      `UPDATE gpt_accounts
+          SET token = ?,
+              refresh_token = ?,
+              token_version = COALESCE(token_version, 0) + 1,
+              updated_at = DATETIME('now', 'localtime')
+        WHERE id = ? AND COALESCE(token_version, 0) = ?`,
+      [resultData.access_token, rotatedRefreshToken, accountId, currentVersion]
     )
-    saveDatabase()
 
-	    const updatedResult = db.exec(
-	      `SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
-	              COALESCE(is_demoted, 0) AS is_demoted,
-	              COALESCE(is_banned, 0) AS is_banned,
-	              COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
-	              created_at, updated_at
-	       FROM gpt_accounts WHERE id = ?`,
-	      [req.params.id]
-	    )
-    const updatedRow = updatedResult[0].values[0]
-	    const account = {
-	      id: updatedRow[0],
-	      email: updatedRow[1],
-	      token: updatedRow[2],
-	      refreshToken: updatedRow[3],
-	      userCount: updatedRow[4],
-	      inviteCount: updatedRow[5],
-	      chatgptAccountId: updatedRow[6],
-	      oaiDeviceId: updatedRow[7],
-	      expireAt: updatedRow[8] || null,
-	      isOpen: Boolean(updatedRow[9]),
-	      isDemoted: Boolean(updatedRow[10]),
-	      isBanned: Boolean(updatedRow[11]),
-	      spaceType: updatedRow[12] || SPACE_TYPE_CHILD,
-	      createdAt: updatedRow[13],
-	      updatedAt: updatedRow[14]
-	    }
+    if (db.getRowsModified() === 0) {
+      incMetric('refreshDuplicateAttempt')
+      const latest = db.exec(`SELECT token, refresh_token, updated_at FROM gpt_accounts WHERE id = ? LIMIT 1`, [accountId])
+      const latestRow = latest[0]?.values?.[0] || []
+      return res.status(409).json({ error: '检测到并发刷新，已拒绝旧版本写回', accessToken: latestRow[0], refreshToken: latestRow[1], updatedAt: latestRow[2] })
+    }
 
-    res.json({
+    await saveDatabase()
+    incMetric('refreshSuccess')
+
+    const payload = {
       message: 'Token 刷新成功',
-      account,
       accessToken: resultData.access_token,
       idToken: resultData.id_token,
-      refreshToken: resultData.refresh_token || refreshToken,
+      refreshToken: rotatedRefreshToken,
       expiresIn: resultData.expires_in || 3600
-    })
+    }
+    await setJsonCache(resultCacheKey, payload, 20)
+    return res.json(payload)
   } catch (error) {
-    console.error('刷新 token 错误:', error?.response?.data || error.message || error)
+    console.error('刷新 token 错误(脱敏):', {
+      upstreamStatus: error?.response?.status || null,
+      error: error?.response?.data?.error || error?.message || 'unknown',
+      errorDescription: error?.response?.data?.error_description || null,
+      hasRefreshToken: true
+    })
 
     if (error.response) {
-      const message =
-        error.response.data?.error?.message ||
-        error.response.data?.error_description ||
-        error.response.data?.error ||
-        '刷新 token 失败'
-
-      // 不直接透传 OpenAI 的状态码，统一返回 502 表示上游服务错误
-      return res.status(502).json({
-        error: message,
+      const code = String(error.response.data?.error || '')
+      const status = code === 'invalid_grant' || code === 'invalid_request' ? 400 : 500
+      return res.status(status).json({
+        error: error.response.data?.error_description || error.response.data?.error || '刷新 token 失败',
         upstream_status: error.response.status
       })
     }
 
-    res.status(500).json({ error: '刷新 token 时发生内部错误' })
+    return res.status(500).json({ error: '刷新 token 时发生内部错误' })
+  } finally {
+    await release()
   }
 })
 
