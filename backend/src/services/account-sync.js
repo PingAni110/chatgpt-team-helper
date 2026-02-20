@@ -13,6 +13,7 @@ export class AccountSyncError extends Error {
 }
 
 const WORKSPACE_EXPIRED_SYNC_ERROR_CODE = 'deactivated_workspace'
+const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
 
 export const isWorkspaceExpiredSyncError = (error) => {
   const status = Number(error?.status ?? error?.statusCode ?? 0)
@@ -118,6 +119,147 @@ async function fetchAccountById(db, accountId) {
   }
 
   return mapRowToAccount(result[0].values[0])
+}
+
+const resolveErrorStatus = (error) => Number(error?.status || error?.statusCode || 0)
+
+const buildRefreshTokenRequestData = (refreshToken) => new URLSearchParams({
+  grant_type: 'refresh_token',
+  client_id: OPENAI_CLIENT_ID,
+  refresh_token: refreshToken,
+  scope: 'openid profile email'
+}).toString()
+
+async function refreshAccountTokenWithRecord(db, account, context = {}) {
+  const accountId = Number(account?.id)
+  const latestAccount = await fetchAccountById(db, accountId)
+  const refreshToken = String(latestAccount?.refreshToken || account?.refreshToken || '').trim()
+
+  if (!refreshToken) {
+    throw new AccountSyncError('Token 已过期或无效，请更新账号 token', 401)
+  }
+
+  const requestData = buildRefreshTokenRequestData(refreshToken)
+  let response
+  try {
+    response = await axios({
+      method: 'POST',
+      url: 'https://auth.openai.com/oauth/token',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': requestData.length
+      },
+      data: requestData,
+      timeout: 60000
+    })
+  } catch (error) {
+    const upstreamStatus = Number(error?.response?.status || 0)
+    const message =
+      error?.response?.data?.error?.message
+      || error?.response?.data?.error_description
+      || error?.response?.data?.error
+      || error?.message
+      || '刷新 token 失败'
+
+    const refreshError = new AccountSyncError(`refresh 失败：${message}`, 502)
+    if (upstreamStatus) refreshError.upstreamStatus = upstreamStatus
+    throw refreshError
+  }
+
+  if (response.status !== 200 || !response.data?.access_token) {
+    throw new AccountSyncError('refresh 失败：未返回有效凭证', 502)
+  }
+
+  db.run(
+    `UPDATE gpt_accounts SET token = ?, refresh_token = ?, updated_at = DATETIME('now', 'localtime') WHERE id = ?`,
+    [response.data.access_token, response.data.refresh_token || refreshToken, accountId]
+  )
+  await saveDatabase()
+
+  const updatedAccount = await fetchAccountById(db, accountId)
+  if (!updatedAccount) {
+    throw new AccountSyncError('账号不存在', 404)
+  }
+
+  console.info('[AccountSync] token refresh success', {
+    accountId,
+    trigger: context.trigger || null
+  })
+
+  return {
+    account: updatedAccount,
+    accessToken: response.data.access_token,
+    idToken: response.data.id_token,
+    refreshToken: response.data.refresh_token || refreshToken,
+    expiresIn: response.data.expires_in || 3600
+  }
+}
+
+async function withAutoRefresh(account, fn, options = {}) {
+  const db = options.db || await getDatabase()
+  const action = options.action || 'unknown_action'
+  const accountId = Number(account?.id)
+  const invoke = async (activeAccount) => {
+    const result = await fn(activeAccount)
+    return { result, account: activeAccount, refreshed: false }
+  }
+
+  try {
+    return await invoke(account)
+  } catch (error) {
+    const firstStatus = resolveErrorStatus(error)
+    const refreshTriggered = firstStatus === 401
+    console.warn('[AccountSync] upstream request failed', {
+      accountId,
+      action,
+      firstStatus,
+      refreshTriggered,
+      message: error?.message || String(error)
+    })
+
+    if (!refreshTriggered) {
+      throw error
+    }
+
+    let refreshed
+    try {
+      refreshed = await refreshAccountTokenWithRecord(db, account, { trigger: action })
+    } catch (refreshError) {
+      console.error('[AccountSync] refresh failed', {
+        accountId,
+        action,
+        refreshStatus: resolveErrorStatus(refreshError),
+        upstreamStatus: refreshError?.upstreamStatus || null,
+        message: refreshError?.message || String(refreshError)
+      })
+      throw new AccountSyncError(`Token 已过期且 refresh 失败：${refreshError?.message || '未知错误'}`, 401)
+    }
+
+    try {
+      const retryResult = await fn(refreshed.account)
+      console.info('[AccountSync] retry after refresh success', { accountId, action })
+      return { result: retryResult, account: refreshed.account, refreshed: true }
+    } catch (retryError) {
+      console.error('[AccountSync] retry after refresh failed', {
+        accountId,
+        action,
+        retryStatus: resolveErrorStatus(retryError),
+        message: retryError?.message || String(retryError)
+      })
+      throw new AccountSyncError(`refresh 成功但上游重试失败：${retryError?.message || '未知错误'}`, resolveErrorStatus(retryError) || 500)
+    }
+  }
+}
+
+export async function refreshAccountAccessToken(accountId, options = {}) {
+  const db = options.db || await getDatabase()
+  const account = options.accountRecord || await fetchAccountById(db, accountId)
+
+  if (!account) {
+    throw new AccountSyncError('账号不存在', 404)
+  }
+
+  return refreshAccountTokenWithRecord(db, account, { trigger: options.trigger || 'manual_refresh' })
 }
 
 export async function fetchAllAccounts() {
@@ -660,7 +802,11 @@ export async function fetchAccountUsersList(accountId, options = {}) {
     throw new AccountSyncError('账号信息不完整，缺少 token 或 chatgpt_account_id', 400)
   }
 
-  const usersData = await requestAccountUsers(account, options.userListParams, { proxy: options.proxy })
+  const { result: usersData } = await withAutoRefresh(
+    account,
+    activeAccount => requestAccountUsers(activeAccount, options.userListParams, { proxy: options.proxy }),
+    { db, action: 'fetchAccountUsersList' }
+  )
   return usersData
 }
 
@@ -678,15 +824,19 @@ export async function syncAccountUserCount(accountId, options = {}) {
     throw new AccountSyncError('账号信息不完整，缺少 token 或 chatgpt_account_id', 400)
   }
 
-  const usersData = await requestAccountUsers(account, { ...(options.userListParams || {}), query: '' }, { proxy: options.proxy })
+  const { result: usersData, account: syncedAccount } = await withAutoRefresh(
+    account,
+    activeAccount => requestAccountUsers(activeAccount, { ...(options.userListParams || {}), query: '' }, { proxy: options.proxy }),
+    { db, action: 'syncAccountUserCount' }
+  )
 
   db.run(
     `UPDATE gpt_accounts SET user_count = ?, updated_at = DATETIME('now', 'localtime') WHERE id = ?`,
-    [usersData.total, account.id]
+    [usersData.total, syncedAccount.id]
   )
   await saveDatabase()
 
-  const updatedAccount = await fetchAccountById(db, account.id)
+  const updatedAccount = await fetchAccountById(db, syncedAccount.id)
 
   return {
     account: updatedAccount,
@@ -709,7 +859,11 @@ export async function fetchAccountInvites(accountId, options = {}) {
     throw new AccountSyncError('账号信息不完整，缺少 token 或 chatgpt_account_id', 400)
   }
 
-  const invitesData = await requestAccountInvites(account, options.inviteListParams, { proxy: options.proxy })
+  const { result: invitesData } = await withAutoRefresh(
+    account,
+    activeAccount => requestAccountInvites(activeAccount, options.inviteListParams, { proxy: options.proxy }),
+    { db, action: 'fetchAccountInvites' }
+  )
   return invitesData
 }
 
@@ -727,15 +881,19 @@ export async function syncAccountInviteCount(accountId, options = {}) {
     throw new AccountSyncError('账号信息不完整，缺少 token 或 chatgpt_account_id', 400)
   }
 
-  const invitesData = await requestAccountInvites(account, options.inviteListParams, { proxy: options.proxy })
+  const { result: invitesData, account: syncedAccount } = await withAutoRefresh(
+    account,
+    activeAccount => requestAccountInvites(activeAccount, options.inviteListParams, { proxy: options.proxy }),
+    { db, action: 'syncAccountInviteCount' }
+  )
 
   db.run(
     `UPDATE gpt_accounts SET invite_count = ?, updated_at = DATETIME('now', 'localtime') WHERE id = ?`,
-    [invitesData.total, account.id]
+    [invitesData.total, syncedAccount.id]
   )
   await saveDatabase()
 
-  const updatedAccount = await fetchAccountById(db, account.id)
+  const updatedAccount = await fetchAccountById(db, syncedAccount.id)
 
   return {
     account: updatedAccount,
@@ -764,9 +922,13 @@ export async function deleteAccountInvite(accountId, emailAddress, options = {})
     throw new AccountSyncError('邮箱格式不正确', 400)
   }
 
-  const result = await requestDeleteAccountInvite(account, trimmedEmail, { proxy: options.proxy })
-  const synced = await syncAccountInviteCount(account.id, {
-    accountRecord: account,
+  const { result, account: refreshedAccount } = await withAutoRefresh(
+    account,
+    activeAccount => requestDeleteAccountInvite(activeAccount, trimmedEmail, { proxy: options.proxy }),
+    { db, action: 'deleteAccountInvite' }
+  )
+  const synced = await syncAccountInviteCount(refreshedAccount.id, {
+    accountRecord: refreshedAccount,
     inviteListParams: { offset: 0, limit: 1, query: '' },
     proxy: options.proxy
   })
@@ -807,41 +969,47 @@ export async function deleteAccountUser(accountId, userId, options = {}) {
   }
 
   console.info('开始删除 ChatGPT 成员', deleteLogContext)
-  const { status, text } = await requestChatgptText(
-    apiUrl,
-    { method: 'DELETE', headers: buildHeaders(account), proxy: options.proxy },
-    deleteLogContext
+  const { result: usersData, account: syncedAccount } = await withAutoRefresh(
+    account,
+    async (activeAccount) => {
+      const { status, text } = await requestChatgptText(
+        apiUrl,
+        { method: 'DELETE', headers: buildHeaders(activeAccount), proxy: options.proxy },
+        deleteLogContext
+      )
+
+      if (status < 200 || status >= 300) {
+        console.error('删除 ChatGPT 用户错误:', {
+          ...deleteLogContext,
+          status,
+          body: String(text || '').slice(0, 2000)
+        })
+
+        if (status === 401) {
+          throw new AccountSyncError('Token 已过期或无效，请更新账号 token', 401)
+        }
+        if (status === 404) {
+          throw new AccountSyncError('指定的用户不存在或无权访问', 404)
+        }
+        if (status === 429) {
+          throw new AccountSyncError('API 请求过于频繁，请稍后重试', 429)
+        }
+
+        throw new AccountSyncError(`ChatGPT API 请求失败: ${status}`, status)
+      }
+
+      return requestAccountUsers(activeAccount, options.userListParams, { proxy: options.proxy })
+    },
+    { db, action: 'deleteAccountUser' }
   )
-
-  if (status < 200 || status >= 300) {
-    console.error('删除 ChatGPT 用户错误:', {
-      ...deleteLogContext,
-      status,
-      body: String(text || '').slice(0, 2000)
-    })
-
-    if (status === 401) {
-      throw new AccountSyncError('Token 已过期或无效，请更新账号 token', 401)
-    }
-    if (status === 404) {
-      throw new AccountSyncError('指定的用户不存在或无权访问', 404)
-    }
-    if (status === 429) {
-      throw new AccountSyncError('API 请求过于频繁，请稍后重试', 429)
-    }
-
-    throw new AccountSyncError(`ChatGPT API 请求失败: ${status}`, status)
-  }
-
-  const usersData = await requestAccountUsers(account, options.userListParams, { proxy: options.proxy })
 
   db.run(
     `UPDATE gpt_accounts SET user_count = ?, updated_at = DATETIME('now', 'localtime') WHERE id = ?`,
-    [usersData.total, account.id]
+    [usersData.total, syncedAccount.id]
   )
   await saveDatabase()
 
-  const updatedAccount = await fetchAccountById(db, account.id)
+  const updatedAccount = await fetchAccountById(db, syncedAccount.id)
 
   return {
     account: updatedAccount,
@@ -885,12 +1053,6 @@ export async function inviteAccountUser(accountId, email, options = {}) {
     resend_emails: true
   }
 
-  const headers = {
-    ...buildHeaders(account),
-    'content-type': 'application/json',
-    origin: 'https://chatgpt.com',
-    referer: 'https://chatgpt.com/admin/members'
-  }
 
   const inviteLogContext = {
     accountId: account.id,
@@ -899,29 +1061,35 @@ export async function inviteAccountUser(accountId, email, options = {}) {
     url: apiUrl
   }
 
-  const { status, text } = await requestChatgptText(
-    apiUrl,
-    { method: 'POST', headers, data: payload, proxy: options.proxy },
-    inviteLogContext
+  const { result: data } = await withAutoRefresh(
+    account,
+    async (activeAccount) => {
+      const { status, text } = await requestChatgptText(
+        apiUrl,
+        { method: 'POST', headers: { ...buildHeaders(activeAccount), 'content-type': 'application/json', origin: 'https://chatgpt.com', referer: 'https://chatgpt.com/admin/members' }, data: payload, proxy: options.proxy },
+        inviteLogContext
+      )
+
+      if (status < 200 || status >= 300) {
+        console.error('发送邀请失败:', status, String(text || '').slice(0, 2000))
+
+        if (status === 401) {
+          throw new AccountSyncError('Token 已过期或无效，请更新账号 token', 401)
+        }
+        if (status === 404) {
+          throw new AccountSyncError('ChatGPT 账号不存在或无权访问', 404)
+        }
+        if (status === 429) {
+          throw new AccountSyncError('API 请求过于频繁，请稍后重试', 429)
+        }
+
+        throw new AccountSyncError(`ChatGPT API 请求失败: ${status}`, status)
+      }
+
+      return parseJsonOrThrow(text, { logContext: inviteLogContext, message: '邀请接口返回格式异常，无法解析' })
+    },
+    { db, action: 'inviteAccountUser' }
   )
-
-  if (status < 200 || status >= 300) {
-    console.error('发送邀请失败:', status, String(text || '').slice(0, 2000))
-
-    if (status === 401) {
-      throw new AccountSyncError('Token 已过期或无效，请更新账号 token', 401)
-    }
-    if (status === 404) {
-      throw new AccountSyncError('ChatGPT 账号不存在或无权访问', 404)
-    }
-    if (status === 429) {
-      throw new AccountSyncError('API 请求过于频繁，请稍后重试', 429)
-    }
-
-    throw new AccountSyncError(`ChatGPT API 请求失败: ${status}`, status)
-  }
-
-  const data = parseJsonOrThrow(text, { logContext: inviteLogContext, message: '邀请接口返回格式异常，无法解析' })
 
   return {
     message: '邀请已发送',
