@@ -215,6 +215,7 @@ const openaiOAuthInput = ref('')
 const openaiOAuthError = ref('')
 const generatingOpenaiAuthUrl = ref(false)
 const exchangingOpenaiCode = ref(false)
+const refreshingAccessToken = ref(false)
 const cachedApiKey = ref<string>('')
 const cachedApiKeyConfigured = ref<boolean | null>(null)
 let openaiOAuthFlowNonce = 0
@@ -368,6 +369,47 @@ const handleClickGetRefreshToken = async () => {
   showOpenaiOAuthPanel.value = true
   if (openaiOAuthSession.value?.authUrl && openaiOAuthSession.value?.sessionId) return
   await generateOpenaiAuthUrl()
+}
+
+const handleManualRefreshAccessToken = async () => {
+  if (!editingAccount.value?.id) {
+    showErrorToast('请先保存账号后再手动获取 Access Token')
+    return
+  }
+
+  if (!String(formData.value.refreshToken || '').trim()) {
+    showErrorToast('请先填写 Refresh Token')
+    return
+  }
+
+  refreshingAccessToken.value = true
+  try {
+    const result = await gptAccountService.refreshToken(editingAccount.value.id)
+    const nextAccessToken = String(result?.accessToken || '').trim()
+    const nextRefreshToken = String(result?.refreshToken || '').trim()
+
+    if (nextAccessToken) {
+      formData.value.token = nextAccessToken
+    }
+    if (nextRefreshToken) {
+      formData.value.refreshToken = nextRefreshToken
+    }
+
+    if (result?.account?.updatedAt && editingAccount.value) {
+      editingAccount.value = {
+        ...editingAccount.value,
+        token: nextAccessToken || editingAccount.value.token,
+        refreshToken: nextRefreshToken || editingAccount.value.refreshToken,
+        updatedAt: result.account.updatedAt
+      }
+    }
+
+    showSuccessToast(result?.message || 'Access Token 刷新成功，已回填')
+  } catch (err: any) {
+    showErrorToast(resolveRequestError(err, '刷新 Access Token 失败'))
+  } finally {
+    refreshingAccessToken.value = false
+  }
 }
 
 const handleOpenAuthUrl = () => {
@@ -1787,7 +1829,25 @@ const handleInviteSubmit = async () => {
                       获取
                     </template>
                   </Button>
+                  <Button
+                    v-if="editingAccount"
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    class="h-11 rounded-xl border-gray-200"
+                    :disabled="refreshingAccessToken || !formData.refreshToken?.trim()"
+                    @click="handleManualRefreshAccessToken"
+                  >
+                    <template v-if="refreshingAccessToken">
+                      <span class="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full mr-2"></span>
+                      获取中
+                    </template>
+                    <template v-else>
+                      手动获取AT
+                    </template>
+                  </Button>
                 </div>
+                <p class="text-[12px] text-gray-400">手动获取AT会调用 refresh_token 立即换取新的 access token，并自动回填表单。</p>
 
                 <div
                   v-if="showOpenaiOAuthPanel"

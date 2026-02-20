@@ -1,17 +1,15 @@
 import express from 'express'
-import axios from 'axios'
 import { getDatabase, saveDatabase } from '../database/init.js'
 import { authenticateToken } from '../middleware/auth.js'
 import { apiKeyAuth } from '../middleware/api-key-auth.js'
 import { requireMenu } from '../middleware/rbac.js'
-import { syncAccountUserCount, syncAccountInviteCount, fetchOpenAiAccountInfo, AccountSyncError, deleteAccountUser, inviteAccountUser, deleteAccountInvite, isWorkspaceExpiredSyncError } from '../services/account-sync.js'
+import { syncAccountUserCount, syncAccountInviteCount, fetchOpenAiAccountInfo, AccountSyncError, deleteAccountUser, inviteAccountUser, deleteAccountInvite, isWorkspaceExpiredSyncError, refreshAccountAccessToken } from '../services/account-sync.js'
 import { SPACE_MEMBER_LIMIT, calcRedeemableSlots, normalizeMemberCount } from '../utils/space-capacity.js'
 import { getWorkspaceExpiredReason, isTokenInvalidSyncError, markAccountSpaceStatus, resolveSpaceStatus } from '../services/account-space-status.js'
 import { SPACE_TYPE_CHILD, normalizeSpaceType, shouldAutoGenerateCodes } from '../utils/space-type.js'
 import { withLocks } from '../utils/locks.js'
 
 const router = express.Router()
-const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
 const SYNC_ALL_TASK_TTL_MS = 30 * 60 * 1000
 const syncAllTaskStore = new Map()
 
@@ -1445,112 +1443,24 @@ router.delete('/:id/invites', async (req, res) => {
 // 刷新账号的 access token
 router.post('/:id/refresh-token', async (req, res) => {
   try {
-    const db = await getDatabase()
-
-	    const result = db.exec(
-	      `SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
-	              COALESCE(is_demoted, 0) AS is_demoted,
-	              COALESCE(is_banned, 0) AS is_banned,
-	              COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
-	              created_at, updated_at
-	       FROM gpt_accounts WHERE id = ?`,
-	      [req.params.id]
-	    )
-
-    if (result.length === 0 || result[0].values.length === 0) {
-      return res.status(404).json({ error: '账号不存在' })
-    }
-
-    const row = result[0].values[0]
-    const refreshToken = row[3]
-
-    if (!refreshToken) {
-      return res.status(400).json({ error: '该账号未配置 refresh token' })
-    }
-
-    const requestData = new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: OPENAI_CLIENT_ID,
-      refresh_token: refreshToken,
-      scope: 'openid profile email'
-    }).toString()
-
-    const requestOptions = {
-      method: 'POST',
-      url: 'https://auth.openai.com/oauth/token',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': requestData.length
-      },
-      data: requestData,
-      timeout: 60000
-    }
-
-    const response = await axios(requestOptions)
-
-    if (response.status !== 200 || !response.data?.access_token) {
-      return res.status(500).json({ error: '刷新 token 失败，未返回有效凭证' })
-    }
-
-    const resultData = response.data
-
-    db.run(
-      `UPDATE gpt_accounts SET token = ?, refresh_token = ?, updated_at = DATETIME('now', 'localtime') WHERE id = ?`,
-      [resultData.access_token, resultData.refresh_token || refreshToken, req.params.id]
-    )
-    saveDatabase()
-
-	    const updatedResult = db.exec(
-	      `SELECT id, email, token, refresh_token, user_count, invite_count, chatgpt_account_id, oai_device_id, expire_at, is_open,
-	              COALESCE(is_demoted, 0) AS is_demoted,
-	              COALESCE(is_banned, 0) AS is_banned,
-	              COALESCE(space_type, '${SPACE_TYPE_CHILD}') AS space_type,
-	              created_at, updated_at
-	       FROM gpt_accounts WHERE id = ?`,
-	      [req.params.id]
-	    )
-    const updatedRow = updatedResult[0].values[0]
-	    const account = {
-	      id: updatedRow[0],
-	      email: updatedRow[1],
-	      token: updatedRow[2],
-	      refreshToken: updatedRow[3],
-	      userCount: updatedRow[4],
-	      inviteCount: updatedRow[5],
-	      chatgptAccountId: updatedRow[6],
-	      oaiDeviceId: updatedRow[7],
-	      expireAt: updatedRow[8] || null,
-	      isOpen: Boolean(updatedRow[9]),
-	      isDemoted: Boolean(updatedRow[10]),
-	      isBanned: Boolean(updatedRow[11]),
-	      spaceType: updatedRow[12] || SPACE_TYPE_CHILD,
-	      createdAt: updatedRow[13],
-	      updatedAt: updatedRow[14]
-	    }
-
+    const result = await refreshAccountAccessToken(Number(req.params.id), { trigger: 'manual_refresh' })
     res.json({
       message: 'Token 刷新成功',
-      account,
-      accessToken: resultData.access_token,
-      idToken: resultData.id_token,
-      refreshToken: resultData.refresh_token || refreshToken,
-      expiresIn: resultData.expires_in || 3600
+      account: result.account,
+      accessToken: result.accessToken,
+      idToken: result.idToken,
+      refreshToken: result.refreshToken,
+      expiresIn: result.expiresIn
     })
   } catch (error) {
-    console.error('刷新 token 错误:', error?.response?.data || error.message || error)
+    console.error('刷新 token 错误:', error)
 
-    if (error.response) {
-      const message =
-        error.response.data?.error?.message ||
-        error.response.data?.error_description ||
-        error.response.data?.error ||
-        '刷新 token 失败'
-
-      // 不直接透传 OpenAI 的状态码，统一返回 502 表示上游服务错误
-      return res.status(502).json({
-        error: message,
-        upstream_status: error.response.status
-      })
+    if (error instanceof AccountSyncError || error?.status) {
+      const payload = { error: error.message }
+      if (error?.upstreamStatus) {
+        payload.upstream_status = error.upstreamStatus
+      }
+      return res.status(error.status || 500).json(payload)
     }
 
     res.status(500).json({ error: '刷新 token 时发生内部错误' })
